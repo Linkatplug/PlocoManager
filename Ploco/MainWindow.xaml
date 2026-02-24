@@ -26,10 +26,10 @@
                 <DataTrigger Binding="{Binding IsForecastOrigin}" Value="True">
                     <Setter Property="Background" Value="Blue"/>
                 </DataTrigger>
-                <!-- Forecast ghost: Show status color with slight transparency to distinguish from real locomotives. Now set to Blue to match origin -->
+                <!-- Forecast ghost: Show status color with slight transparency to distinguish from real locomotives. Now set to LightBlue -->
                 <DataTrigger Binding="{Binding IsForecastGhost}" Value="True">
-                    <Setter Property="Background" Value="Blue"/>
-                    <Setter Property="Opacity" Value="0.8"/>
+                    <Setter Property="Background" Value="DeepSkyBlue"/>
+                    <Setter Property="Opacity" Value="0.65"/>
                 </DataTrigger>
             </Style.Triggers>
         </Style>

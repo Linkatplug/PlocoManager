@@ -33,36 +33,45 @@ namespace Ploco.Dialogs
                          .Where(l => IsT13(l) && string.Equals(l.Pool, "Sibelit", StringComparison.OrdinalIgnoreCase))
                          .OrderBy(l => l.Number))
             {
-                // Get the EFFECTIVE track (considers forecast/ghost mode)
-                var effectiveTrack = GetEffectiveTrack(loco, tracks, allLocomotives);
-                
-                // Get text based on effective track
-                var trainLocationText = GetTrainLocationText(loco, effectiveTrack, tiles);
-                var rollingLineNumber = ResolveRollingLineNumber(effectiveTrack);
+                var realTrack = tracks.FirstOrDefault(t => t.Locomotives.Contains(loco));
+                var ghostTrack = (loco.IsForecastOrigin && loco.ForecastTargetRollingLineTrackId.HasValue) 
+                    ? tracks.FirstOrDefault(t => t.Id == loco.ForecastTargetRollingLineTrackId.Value)
+                    : null;
 
                 var isHs = loco.Status == LocomotiveStatus.HS;
-                
-                // Green condition: Non-HS + on Line track + with train
-                var isNonHsOnLine = !isHs 
-                    && effectiveTrack?.Kind == TrackKind.Line 
-                    && effectiveTrack.IsOnTrain == true;
-
-                // For HS on rolling line: different display for LocHs vs Report
                 string locHs, report;
-                if (isHs && !string.IsNullOrWhiteSpace(rollingLineNumber))
+                bool isNonHsOnLine;
+
+                if (ghostTrack != null)
                 {
-                    // HS on rolling line: show origin tile in LocHs, "HS CV {number}" in Report
-                    locHs = GetOriginTileLocation(loco, tiles);
-                    report = $"HS CV {rollingLineNumber}";
+                    string originStr = GetLocationTextForTrack(loco, realTrack, tiles);
+                    string targetStr = GetLocationTextForTrack(loco, ghostTrack, tiles);
+                    report = $"{originStr} + {targetStr}";
+                    locHs = isHs ? report : string.Empty;
+
+                    isNonHsOnLine = !isHs && ((realTrack?.Kind == TrackKind.Line && realTrack?.IsOnTrain == true) || 
+                                              (ghostTrack?.Kind == TrackKind.Line && ghostTrack?.IsOnTrain == true));
                 }
                 else
                 {
-                    // Normal logic for other cases
-                    locHs = isHs ? trainLocationText : string.Empty;
-                    report = isHs ? trainLocationText 
-                        : isNonHsOnLine ? trainLocationText
-                        : !string.IsNullOrWhiteSpace(rollingLineNumber) ? rollingLineNumber
-                        : trainLocationText;
+                    var trainLocationText = GetTrainLocationText(loco, realTrack, tiles);
+                    var rollingLineNumber = ResolveRollingLineNumber(realTrack);
+
+                    isNonHsOnLine = !isHs && realTrack?.Kind == TrackKind.Line && realTrack?.IsOnTrain == true;
+
+                    if (isHs && !string.IsNullOrWhiteSpace(rollingLineNumber))
+                    {
+                        locHs = GetOriginTileLocation(loco, tiles);
+                        report = $"HS CV {rollingLineNumber}";
+                    }
+                    else
+                    {
+                        locHs = isHs ? trainLocationText : string.Empty;
+                        report = isHs ? trainLocationText 
+                            : isNonHsOnLine ? trainLocationText
+                            : !string.IsNullOrWhiteSpace(rollingLineNumber) ? rollingLineNumber
+                            : trainLocationText;
+                    }
                 }
                 
                 // Motif/Status info for HS, DefautMineur, and ManqueTraction
@@ -90,34 +99,11 @@ namespace Ploco.Dialogs
             UpdateSummary();
         }
         
-        /// <summary>
-        /// Gets the effective track for a locomotive.
-        /// If locomotive is in forecast mode (IsForecastOrigin), returns the ghost's track.
-        /// Otherwise returns the real track.
-        /// </summary>
-        private static TrackModel? GetEffectiveTrack(LocomotiveModel loco, List<TrackModel> tracks, List<LocomotiveModel> allLocomotives)
+        private static string GetLocationTextForTrack(LocomotiveModel loco, TrackModel? track, IEnumerable<TileModel> tiles)
         {
-            // Check if locomotive is in forecast origin mode (blue locomotive)
-            if (loco.IsForecastOrigin && loco.ForecastTargetRollingLineTrackId.HasValue)
-            {
-                // Find the ghost locomotive
-                var ghost = allLocomotives.FirstOrDefault(l => 
-                    l.IsForecastGhost && 
-                    l.ForecastSourceLocomotiveId == loco.Id);
-                
-                if (ghost != null)
-                {
-                    // Return the ghost's track
-                    var ghostTrack = tracks.FirstOrDefault(t => t.Locomotives.Contains(ghost));
-                    if (ghostTrack != null)
-                    {
-                        return ghostTrack;
-                    }
-                }
-            }
-            
-            // Return real track
-            return tracks.FirstOrDefault(t => t.Locomotives.Contains(loco));
+            if (track == null) return string.Empty;
+            if (track.Kind == TrackKind.RollingLine) return track.Name;
+            return GetTrainLocationText(loco, track, tiles);
         }
 
         /// <summary>

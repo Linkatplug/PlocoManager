@@ -125,11 +125,26 @@ namespace Ploco.ViewModels
                     if (sourceTrack != null)
                     {
                         SwapLocomotivesBetweenTracks(loco, sourceTrack, existingLoco, targetTrack);
-                        return;
                     }
+                    else
+                    {
+                        targetTrack.Locomotives.Remove(existingLoco);
+                        existingLoco.AssignedTrackId = null;
+                        existingLoco.AssignedTrackOffsetX = null;
+
+                        targetTrack.Locomotives.Add(loco);
+                        loco.AssignedTrackId = targetTrack.Id;
+                        loco.AssignedTrackOffsetX = null;
+
+                        PlacementLogicHelper.EnsureTrackOffsets(targetTrack);
+                        UpdatePoolVisibility();
+                        OnStatePersisted?.Invoke();
+                        OnWorkspaceChanged?.Invoke();
+                    }
+                    return;
                 }
                 
-                _dialogService.ShowMessage("Swap impossible", "Cette tuile est déjà occupée par une locomotive avec laquelle vous ne pouvez pas effectuer de swap.");
+                _dialogService.ShowMessage("Swap impossible", "Cette tuile est déjà occupée par une locomotive avec laquelle vous ne pouvez pas effectuer d'échange.");
                 return;
             }
 

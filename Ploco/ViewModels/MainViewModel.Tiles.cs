@@ -244,8 +244,13 @@ namespace Ploco.ViewModels
 
                 if (loco.AssignedTrackId != null)
                 {
-                    unavailableLocos.Add(number.ToString());
-                    continue;
+                    // Forcer le déplacement : on arrache la loco de son ancienne voie
+                    var oldTrack = Tiles.SelectMany(t => t.Tracks).FirstOrDefault(t => t.Locomotives.Contains(loco));
+                    if (oldTrack != null)
+                    {
+                        oldTrack.Locomotives.Remove(loco);
+                        UpdatePoolVisibility();
+                    }
                 }
 
                 MoveLocomotiveToTrack(loco, track, track.Locomotives.Count);
@@ -292,9 +297,9 @@ namespace Ploco.ViewModels
                 _dialogService.ShowMessage("Information", string.Join(Environment.NewLine, missingMessage));
             }
 
-            if (unavailableLocos.Any())
+            if (invalidLocos.Any() || invalidHsLocos.Any())
             {
-                _dialogService.ShowMessage("Information", $"Locomotives déjà affectées ignorées : {string.Join(", ", unavailableLocos)}.");
+                _dialogService.ShowMessage("Information", $"Numéros invalides ignorés : {string.Join(", ", invalidLocos.Concat(invalidHsLocos))}.");
             }
 
             OnStatePersisted?.Invoke();
@@ -313,8 +318,8 @@ namespace Ploco.ViewModels
                 
                 if (realLocosInTarget.Any() && !targetTrack.Locomotives.Contains(loco))
                 {
-                    Helpers.Logger.Warning($"Cannot move loco Id={loco.Id} Number={loco.Number} to occupied rolling line {targetTrack.Name} (occupied by {realLocosInTarget.Count} real loco(s))", "Movement");
-                    _dialogService.ShowMessage("Action impossible", "Une seule locomotive est autorisée par ligne de roulement.");
+                    // L'UI a déjà fait le Swap via TryMoveLocomotiveToTrack si c'était éligible.
+                    // Si on arrive ici, on bloque gentiment.
                     return;
                 }
             }
@@ -413,7 +418,8 @@ namespace Ploco.ViewModels
 
         internal void EnsureDefaultTracks(TileModel tile)
         {
-            if (string.Equals(tile.Name, "Anvers Nord", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(tile.Name, "Anvers Nord", StringComparison.OrdinalIgnoreCase) || 
+                string.Equals(tile.Name, "Zeebrugge", StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
@@ -455,6 +461,17 @@ namespace Ploco.ViewModels
                 if (!tile.Tracks.Any(t => t.Kind == TrackKind.Zone && t.Name == "917"))
                 {
                     tile.Tracks.Add(new TrackModel { Name = "917", Kind = TrackKind.Zone, LeftLabel = "BLOCK", RightLabel = "BIF" });
+                }
+            }
+            else if (tile.Name.Equals("Zeebrugge", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!tile.Tracks.Any(t => t.Kind == TrackKind.Zone && t.Name == "BRAM"))
+                {
+                    tile.Tracks.Add(new TrackModel { Name = "BRAM", Kind = TrackKind.Zone });
+                }
+                if (!tile.Tracks.Any(t => t.Kind == TrackKind.Zone && t.Name == "ZWAN"))
+                {
+                    tile.Tracks.Add(new TrackModel { Name = "ZWAN", Kind = TrackKind.Zone });
                 }
             }
             

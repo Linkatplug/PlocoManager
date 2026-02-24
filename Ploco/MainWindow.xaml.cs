@@ -47,6 +47,7 @@ namespace Ploco
             _repository = App.ServiceProvider.GetRequiredService<IPlocoRepository>();
             _viewModel.InitializeEvents(PersistState, LoadState);
             _viewModel.RequestLocomotiveListRefresh += RefreshLocomotivesDisplay;
+            _viewModel.OnWorkspaceChanged += RefreshTapisT13;
             
             InputBindings.Add(new KeyBinding(LocomotiveHsCommand, new KeyGesture(Key.H, ModifierKeys.Control)));
             CommandBindings.Add(new CommandBinding(LocomotiveHsCommand, LocomotiveHsCommand_Executed, LocomotiveHsCommand_CanExecute));
@@ -111,7 +112,10 @@ namespace Ploco
             var state = _repository.LoadState();
             foreach (var loco in state.Locomotives.OrderBy(l => l.SeriesName).ThenBy(l => l.Number))
             {
-                _viewModel.Locomotives.Add(loco);
+                if (!loco.IsForecastGhost)
+                {
+                    _viewModel.Locomotives.Add(loco);
+                }
             }
 
             foreach (var tile in state.Tiles)
@@ -124,14 +128,33 @@ namespace Ploco
                 _viewModel.Tiles.Add(tile);
             }
 
+            // Restore Ghost links
+            var realLocos = _viewModel.Locomotives.ToList();
+            var ghosts = state.Locomotives.Where(l => l.IsForecastGhost).ToList();
+            
+            foreach (var ghost in ghosts)
+            {
+                var origin = realLocos.FirstOrDefault(l => l.Number == ghost.Number && l.IsForecastOrigin);
+                if (origin != null)
+                {
+                    ghost.ForecastSourceLocomotiveId = origin.Id;
+                    origin.ForecastTargetRollingLineTrackId = ghost.AssignedTrackId;
+                }
+            }
+
             _viewModel.UpdatePoolVisibility();
             UpdateTileCanvasExtent();
         }
 
         private void PersistState()
         {
-            // Filter out ghost locomotives from tracks before saving
-            var locomotivesToSave = _viewModel.Locomotives.Where(l => !l.IsForecastGhost).ToList();
+            // Collect all locomotives including ghosts
+            var locomotivesToSave = _viewModel.Locomotives.ToList();
+            var ghosts = _viewModel.Tiles.SelectMany(t => t.Tracks)
+                                         .SelectMany(t => t.Locomotives)
+                                         .Where(l => l.IsForecastGhost)
+                                         .ToList();
+            locomotivesToSave.AddRange(ghosts);
             
             // Create a clean copy of tiles without ghosts
             var tilesToSave = new List<TileModel>();
@@ -171,8 +194,8 @@ namespace Ploco
                         TrainNumber = track.TrainNumber
                     };
 
-                    // Only add non-ghost locomotives to the track
-                    foreach (var loco in track.Locomotives.Where(l => !l.IsForecastGhost))
+                    // Add all locomotives (including ghosts) to the track
+                    foreach (var loco in track.Locomotives)
                     {
                         trackCopy.Locomotives.Add(loco);
                     }
@@ -750,10 +773,14 @@ namespace Ploco
                 
                 var importWindow = new ImportWindow(_viewModel.Locomotives, () =>
                 {
-                    // Callback when import is complete
-                    // Refresh the UI to show updated pools
-                    PersistState();
-                    RefreshLocomotivesDisplay();
+                    Application.Current.Dispatcher.InvokeAsync(() =>
+                    {
+                        // Callback when import is complete
+                        // Refresh the UI to show updated pools
+                        _viewModel.UpdatePoolVisibility();
+                        PersistState();
+                        RefreshLocomotivesDisplay();
+                    });
                 });
                 
                 importWindow.Owner = this;

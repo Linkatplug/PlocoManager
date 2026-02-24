@@ -147,6 +147,8 @@ namespace Ploco.Data
             EnsureColumn(connection, "locomotives", "defaut_info", "TEXT");
             EnsureColumn(connection, "locomotives", "traction_info", "TEXT");
             EnsureColumn(connection, "locomotives", "maintenance_date", "TEXT");
+            EnsureColumn(connection, "locomotives", "is_forecast_origin", "INTEGER DEFAULT 0");
+            EnsureColumn(connection, "locomotives", "is_forecast_ghost", "INTEGER DEFAULT 0");
             EnsureColumn(connection, "tracks", "type", "TEXT NOT NULL DEFAULT 'Main'");
             EnsureColumn(connection, "tracks", "config_json", "TEXT");
             EnsureColumn(connection, "track_locomotives", "offset_x", "REAL");
@@ -504,7 +506,7 @@ namespace Ploco.Data
 
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = "SELECT id, series_id, number, status, pool, traction_percent, hs_reason, defaut_info, traction_info, maintenance_date FROM locomotives;";
+                command.CommandText = "SELECT id, series_id, number, status, pool, traction_percent, hs_reason, defaut_info, traction_info, maintenance_date, is_forecast_origin, is_forecast_ghost FROM locomotives;";
                 using var reader = command.ExecuteReader();
                 while (reader.Read())
                 {
@@ -524,7 +526,9 @@ namespace Ploco.Data
                         HsReason = reader.IsDBNull(6) ? null : reader.GetString(6),
                         DefautInfo = reader.IsDBNull(7) ? null : reader.GetString(7),
                         TractionInfo = reader.IsDBNull(8) ? null : reader.GetString(8),
-                        MaintenanceDate = reader.IsDBNull(9) ? null : reader.GetString(9)
+                        MaintenanceDate = reader.IsDBNull(9) ? null : reader.GetString(9),
+                        IsForecastOrigin = !reader.IsDBNull(10) && reader.GetInt32(10) == 1,
+                        IsForecastGhost = !reader.IsDBNull(11) && reader.GetInt32(11) == 1
                     });
                 }
             }
@@ -659,7 +663,7 @@ namespace Ploco.Data
 
             using (var insertLoco = connection.CreateCommand())
             {
-                insertLoco.CommandText = "INSERT INTO locomotives (series_id, number, status, pool) VALUES ($seriesId, $number, $status, $pool);";
+                insertLoco.CommandText = "INSERT INTO locomotives (series_id, number, status, pool, is_forecast_origin, is_forecast_ghost) VALUES ($seriesId, $number, $status, $pool, 0, 0);";
                 var seriesParam = insertLoco.CreateParameter();
                 seriesParam.ParameterName = "$seriesId";
                 insertLoco.Parameters.Add(seriesParam);
@@ -713,7 +717,7 @@ namespace Ploco.Data
                     loco.SeriesId = newSeriesId;
                 }
                 using var command = connection.CreateCommand();
-                command.CommandText = "INSERT INTO locomotives (series_id, number, status, pool, traction_percent, hs_reason, defaut_info, traction_info, maintenance_date) VALUES ($seriesId, $number, $status, $pool, $traction, $reason, $defaut, $tractionInfo, $maintenance);";
+                command.CommandText = "INSERT INTO locomotives (series_id, number, status, pool, traction_percent, hs_reason, defaut_info, traction_info, maintenance_date, is_forecast_origin, is_forecast_ghost) VALUES ($seriesId, $number, $status, $pool, $traction, $reason, $defaut, $tractionInfo, $maintenance, $isOrigin, $isGhost);";
                 command.Parameters.AddWithValue("$seriesId", loco.SeriesId);
                 command.Parameters.AddWithValue("$number", loco.Number);
                 command.Parameters.AddWithValue("$status", loco.Status.ToString());
@@ -723,6 +727,8 @@ namespace Ploco.Data
                 command.Parameters.AddWithValue("$defaut", string.IsNullOrWhiteSpace(loco.DefautInfo) ? DBNull.Value : loco.DefautInfo);
                 command.Parameters.AddWithValue("$tractionInfo", string.IsNullOrWhiteSpace(loco.TractionInfo) ? DBNull.Value : loco.TractionInfo);
                 command.Parameters.AddWithValue("$maintenance", string.IsNullOrWhiteSpace(loco.MaintenanceDate) ? DBNull.Value : loco.MaintenanceDate);
+                command.Parameters.AddWithValue("$isOrigin", loco.IsForecastOrigin ? 1 : 0);
+                command.Parameters.AddWithValue("$isGhost", loco.IsForecastGhost ? 1 : 0);
                 command.ExecuteNonQuery();
                 loco.Id = GetLastInsertRowId(connection);
             }

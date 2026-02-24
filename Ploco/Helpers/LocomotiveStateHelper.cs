@@ -49,16 +49,11 @@ namespace Ploco.Helpers
         /// <summary>
         /// Vérifie si une locomotive est éligible pour un échange (Swap).
         /// </summary>
-        public static bool IsEligibleForSwap(LocomotiveModel sibelitLoco, LocomotiveModel lineasLoco)
+        public static bool IsEligibleForSwap(LocomotiveModel loco1, LocomotiveModel loco2)
         {
-            if (sibelitLoco == null || lineasLoco == null) return false;
-            if (sibelitLoco.IsForecastGhost || lineasLoco.IsForecastGhost) return false;
+            if (loco1 == null || loco2 == null) return false;
+            if (loco1.IsForecastGhost || loco2.IsForecastGhost) return false;
             
-            // Le swap ne fonctionne classiquement qu'entre une loco Sibelit (placée) et une loco Lineas (dispo en liste)
-            if (!string.Equals(sibelitLoco.Pool, "Sibelit", StringComparison.OrdinalIgnoreCase)) return false;
-            if (!string.Equals(lineasLoco.Pool, "Lineas", StringComparison.OrdinalIgnoreCase)) return false;
-            if (lineasLoco.AssignedTrackId != null) return false;
-
             return true;
         }
 

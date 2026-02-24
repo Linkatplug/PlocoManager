@@ -61,7 +61,8 @@ namespace Ploco.Dialogs
             }
 
             // Check if it's a simple number (backward compatibility)
-            if (int.TryParse(input, out var simpleCount))
+            // Si le nombre est grand (ex: 5404), l'utilisateur souhaite créer spécifiquement cette ligne, pas 5404 lignes.
+            if (int.TryParse(input, out var simpleCount) && simpleCount < 150)
             {
                 if (simpleCount <= 0)
                 {
