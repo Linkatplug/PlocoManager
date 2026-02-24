@@ -40,7 +40,7 @@ namespace Ploco.ViewModels
         // --- Commandes ---
 
         [RelayCommand]
-        public void SaveDatabase()
+        public async Task SaveDatabaseAsync()
         {
             OnStatePersisted?.Invoke();
 
@@ -52,12 +52,12 @@ namespace Ploco.ViewModels
 
             if (dialog.ShowDialog() == true && _repository != null)
             {
-                _repository.CopyDatabaseTo(dialog.FileName);
+                await _repository.CopyDatabaseToAsync(dialog.FileName);
             }
         }
 
         [RelayCommand]
-        public void LoadDatabase()
+        public async Task LoadDatabaseAsync()
         {
             var dialog = new Microsoft.Win32.OpenFileDialog
             {
@@ -72,7 +72,7 @@ namespace Ploco.ViewModels
                     return;
                 }
 
-                _repository.Initialize();
+                await _repository.InitializeAsync();
                 OnStateLoaded?.Invoke();
             }
         }

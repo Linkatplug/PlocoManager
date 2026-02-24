@@ -6,24 +6,24 @@ namespace Ploco.Data
 {
     public interface IPlocoRepository
     {
-        void Initialize();
-        PdfDocumentModel? GetPdfDocument(string filePath, DateTime date);
-        PdfDocumentModel SavePdfDocument(PdfDocumentModel document);
-        List<PdfTemplateCalibrationModel> LoadTemplateCalibrations(string templateHash);
-        void SaveTemplateCalibration(PdfTemplateCalibrationModel calibration);
-        List<PdfPlacementModel> LoadPlacements(int pdfDocumentId);
-        void SavePlacement(PdfPlacementModel placement);
-        void DeletePlacement(int placementId);
-        AppState LoadState();
-        void SeedDefaultDataIfNeeded();
-        void SaveState(AppState state);
-        void AddHistory(string action, string details);
-        List<HistoryEntry> LoadHistory();
-        Dictionary<string, int> GetTableCounts();
-        Dictionary<TrackKind, int> GetTrackKindCounts();
-        void ClearHistory();
-        void ResetOperationalState();
-        void CopyDatabaseTo(string destinationPath);
+        Task InitializeAsync();
+        Task<PdfDocumentModel?> GetPdfDocumentAsync(string filePath, DateTime date);
+        Task<PdfDocumentModel> SavePdfDocumentAsync(PdfDocumentModel document);
+        Task<List<PdfTemplateCalibrationModel>> LoadTemplateCalibrationsAsync(string templateHash);
+        Task SaveTemplateCalibrationAsync(PdfTemplateCalibrationModel calibration);
+        Task<List<PdfPlacementModel>> LoadPlacementsAsync(int pdfDocumentId);
+        Task SavePlacementAsync(PdfPlacementModel placement);
+        Task DeletePlacementAsync(int placementId);
+        Task<AppState> LoadStateAsync();
+        Task SeedDefaultDataIfNeededAsync();
+        Task SaveStateAsync(AppState state);
+        Task AddHistoryAsync(string action, string details);
+        Task<List<HistoryEntry>> LoadHistoryAsync();
+        Task<Dictionary<string, int>> GetTableCountsAsync();
+        Task<Dictionary<TrackKind, int>> GetTrackKindCountsAsync();
+        Task ClearHistoryAsync();
+        Task ResetOperationalStateAsync();
+        Task CopyDatabaseToAsync(string destinationPath);
         bool ReplaceDatabaseWith(string sourcePath);
     }
 }

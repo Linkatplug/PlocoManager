@@ -9,7 +9,7 @@ namespace Ploco.ViewModels
     public partial class MainViewModel
     {
         [RelayCommand]
-        public void PlacementPrevisionnel(LocomotiveModel loco)
+        public async Task PlacementPrevisionnelAsync(LocomotiveModel loco)
         {
             if (loco == null) return;
 
@@ -35,13 +35,13 @@ namespace Ploco.ViewModels
             ghost.AssignedTrackId = targetTrack.Id;
             targetTrack.Locomotives.Add(ghost);
 
-            _repository.AddHistory("ForecastPlacement", $"Placement prévisionnel de la loco {loco.Number} vers {targetTrack.Name}.");
+            await _repository.AddHistoryAsync("ForecastPlacement", $"Placement prévisionnel de la loco {loco.Number} vers {targetTrack.Name}.");
             OnStatePersisted?.Invoke();
             OnWorkspaceChanged?.Invoke();
         }
 
         [RelayCommand]
-        public void AnnulerPrevisionnel(LocomotiveModel loco)
+        public async Task AnnulerPrevisionnelAsync(LocomotiveModel loco)
         {
             if (loco == null || !loco.IsForecastOrigin) return;
 
@@ -50,13 +50,13 @@ namespace Ploco.ViewModels
             loco.IsForecastOrigin = false;
             loco.ForecastTargetRollingLineTrackId = null;
 
-            _repository.AddHistory("ForecastCancelled", $"Annulation du placement prévisionnel de la loco {loco.Number}.");
+            await _repository.AddHistoryAsync("ForecastCancelled", $"Annulation du placement prévisionnel de la loco {loco.Number}.");
             OnStatePersisted?.Invoke();
             OnWorkspaceChanged?.Invoke();
         }
 
         [RelayCommand]
-        public void ValiderPrevisionnel(LocomotiveModel loco)
+        public async Task ValiderPrevisionnelAsync(LocomotiveModel loco)
         {
             if (loco == null || !loco.IsForecastOrigin) return;
 
@@ -104,7 +104,7 @@ namespace Ploco.ViewModels
             // Déplace la locomotive (MoveLocomotiveToTrack est déjà défini dans MainViewModel.Tiles.cs)
             MoveLocomotiveToTrack(loco, targetTrack, 0);
 
-            _repository.AddHistory("ForecastValidated", $"Validation du placement prévisionnel de {loco.Number} sur {targetTrack.Name}.");
+            await _repository.AddHistoryAsync("ForecastValidated", $"Validation du placement prévisionnel de {loco.Number} sur {targetTrack.Name}.");
             OnStatePersisted?.Invoke();
             OnWorkspaceChanged?.Invoke();
         }

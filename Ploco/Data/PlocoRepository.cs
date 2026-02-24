@@ -4,6 +4,7 @@ using System.Linq;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using Ploco.Models;
 
@@ -20,11 +21,11 @@ namespace Ploco.Data
             _connectionString = $"Data Source={databasePath}";
         }
 
-        public void Initialize()
+        public async Task InitializeAsync()
         {
             EnsureDatabaseFile();
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            await connection.OpenAsync();
 
             var commands = new[]
             {
@@ -154,18 +155,19 @@ namespace Ploco.Data
             EnsureColumn(connection, "track_locomotives", "offset_x", "REAL");
         }
 
-        public PdfDocumentModel? GetPdfDocument(string filePath, DateTime date)
+        public async Task<PdfDocumentModel?> GetPdfDocumentAsync(string filePath, DateTime date)
         {
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            await connection.OpenAsync();
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT id, file_path, document_date, template_hash, page_count
                                     FROM pdf_documents
                                     WHERE file_path = $path AND document_date = $date;";
             command.Parameters.AddWithValue("$path", filePath);
             command.Parameters.AddWithValue("$date", date.ToString("yyyy-MM-dd"));
-            using var reader = command.ExecuteReader();
-            if (!reader.Read())
+
+            using var reader = await command.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
             {
                 return null;
             }
@@ -180,18 +182,16 @@ namespace Ploco.Data
             };
         }
 
-        public PdfDocumentModel SavePdfDocument(PdfDocumentModel document)
+        public async Task<PdfDocumentModel> SavePdfDocumentAsync(PdfDocumentModel document)
         {
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            await connection.OpenAsync();
             using var command = connection.CreateCommand();
+
             if (document.Id > 0)
             {
                 command.CommandText = @"UPDATE pdf_documents
-                                        SET file_path = $path,
-                                            document_date = $date,
-                                            template_hash = $hash,
-                                            page_count = $count
+                                        SET file_path = $path, document_date = $date, template_hash = $hash, page_count = $count
                                         WHERE id = $id;";
                 command.Parameters.AddWithValue("$id", document.Id);
             }
@@ -205,21 +205,21 @@ namespace Ploco.Data
             command.Parameters.AddWithValue("$date", document.DocumentDate.ToString("yyyy-MM-dd"));
             command.Parameters.AddWithValue("$hash", document.TemplateHash);
             command.Parameters.AddWithValue("$count", document.PageCount);
-            command.ExecuteNonQuery();
+            await command.ExecuteNonQueryAsync();
 
             if (document.Id == 0)
             {
-                document.Id = GetLastInsertRowId(connection);
+                document.Id = await GetLastInsertRowIdAsync(connection);
             }
 
             return document;
         }
 
-        public List<PdfTemplateCalibrationModel> LoadTemplateCalibrations(string templateHash)
+        public async Task<List<PdfTemplateCalibrationModel>> LoadTemplateCalibrationsAsync(string templateHash)
         {
             var calibrations = new List<PdfTemplateCalibrationModel>();
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            await connection.OpenAsync();
 
             using (var command = connection.CreateCommand())
             {
@@ -227,8 +227,8 @@ namespace Ploco.Data
                                         FROM pdf_template_calibrations
                                         WHERE template_hash = $hash;";
                 command.Parameters.AddWithValue("$hash", templateHash);
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
+                using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
                 {
                     calibrations.Add(new PdfTemplateCalibrationModel
                     {
@@ -243,17 +243,17 @@ namespace Ploco.Data
 
             foreach (var calibration in calibrations)
             {
-                calibration.Rows = LoadTemplateRows(connection, calibration.Id);
-                calibration.VisualLines = LoadCalibrationLines(connection, calibration.Id);
+                calibration.Rows = await LoadTemplateRowsAsync(connection, calibration.Id);
+                calibration.VisualLines = await LoadCalibrationLinesAsync(connection, calibration.Id);
             }
 
             return calibrations;
         }
 
-        public void SaveTemplateCalibration(PdfTemplateCalibrationModel calibration)
+        public async Task SaveTemplateCalibrationAsync(PdfTemplateCalibrationModel calibration)
         {
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            await connection.OpenAsync();
             using var transaction = connection.BeginTransaction();
 
             using (var command = connection.CreateCommand())
@@ -275,11 +275,11 @@ namespace Ploco.Data
 
                 command.Parameters.AddWithValue("$xStart", calibration.XStart);
                 command.Parameters.AddWithValue("$xEnd", calibration.XEnd);
-                command.ExecuteNonQuery();
+                await command.ExecuteNonQueryAsync();
 
                 if (calibration.Id == 0)
                 {
-                    calibration.Id = GetLastInsertRowId(connection);
+                    calibration.Id = await GetLastInsertRowIdAsync(connection);
                 }
             }
 
@@ -287,7 +287,7 @@ namespace Ploco.Data
             {
                 deleteRows.CommandText = "DELETE FROM pdf_template_rows WHERE calibration_id = $id;";
                 deleteRows.Parameters.AddWithValue("$id", calibration.Id);
-                deleteRows.ExecuteNonQuery();
+                await deleteRows.ExecuteNonQueryAsync();
             }
 
             foreach (var row in calibration.Rows)
@@ -298,7 +298,7 @@ namespace Ploco.Data
                 insertRow.Parameters.AddWithValue("$calibrationId", calibration.Id);
                 insertRow.Parameters.AddWithValue("$roulementId", row.RoulementId);
                 insertRow.Parameters.AddWithValue("$yCenter", row.YCenter);
-                insertRow.ExecuteNonQuery();
+                await insertRow.ExecuteNonQueryAsync();
             }
 
             // Sauvegarder les lignes visuelles
@@ -306,7 +306,7 @@ namespace Ploco.Data
             {
                 deleteLines.CommandText = "DELETE FROM pdf_calibration_lines WHERE calibration_id = $id;";
                 deleteLines.Parameters.AddWithValue("$id", calibration.Id);
-                deleteLines.ExecuteNonQuery();
+                await deleteLines.ExecuteNonQueryAsync();
             }
 
             foreach (var line in calibration.VisualLines)
@@ -319,17 +319,17 @@ namespace Ploco.Data
                 insertLine.Parameters.AddWithValue("$position", line.Position);
                 insertLine.Parameters.AddWithValue("$label", line.Label);
                 insertLine.Parameters.AddWithValue("$minuteOfDay", line.MinuteOfDay.HasValue ? (object)line.MinuteOfDay.Value : DBNull.Value);
-                insertLine.ExecuteNonQuery();
+                await insertLine.ExecuteNonQueryAsync();
             }
 
             transaction.Commit();
         }
 
-        public List<PdfPlacementModel> LoadPlacements(int pdfDocumentId)
+        public async Task<List<PdfPlacementModel>> LoadPlacementsAsync(int pdfDocumentId)
         {
             var placements = new List<PdfPlacementModel>();
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            await connection.OpenAsync();
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT id, pdf_document_id, page_index, roulement_id, minute_of_day,
                                            loc_number, status, traction_percent, motors_hs_count, hs_reason,
@@ -337,8 +337,8 @@ namespace Ploco.Data
                                     FROM pdf_placements
                                     WHERE pdf_document_id = $docId;";
             command.Parameters.AddWithValue("$docId", pdfDocumentId);
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
             {
                 placements.Add(new PdfPlacementModel
                 {
@@ -364,10 +364,10 @@ namespace Ploco.Data
             return placements;
         }
 
-        public void SavePlacement(PdfPlacementModel placement)
+        public async Task SavePlacementAsync(PdfPlacementModel placement)
         {
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            await connection.OpenAsync();
             using var command = connection.CreateCommand();
             if (placement.Id > 0)
             {
@@ -415,25 +415,25 @@ namespace Ploco.Data
             command.Parameters.AddWithValue("$trainStopTime", string.IsNullOrWhiteSpace(placement.TrainStopTime) ? DBNull.Value : placement.TrainStopTime);
             command.Parameters.AddWithValue("$comment", string.IsNullOrWhiteSpace(placement.Comment) ? DBNull.Value : placement.Comment);
             command.Parameters.AddWithValue("$updatedAt", placement.UpdatedAt.ToString("O"));
-            command.ExecuteNonQuery();
+            await command.ExecuteNonQueryAsync();
 
             if (placement.Id == 0)
             {
-                placement.Id = GetLastInsertRowId(connection);
+                placement.Id = await GetLastInsertRowIdAsync(connection);
             }
         }
 
-        public void DeletePlacement(int placementId)
+        public async Task DeletePlacementAsync(int placementId)
         {
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            await connection.OpenAsync();
             using var command = connection.CreateCommand();
             command.CommandText = "DELETE FROM pdf_placements WHERE id = $id;";
             command.Parameters.AddWithValue("$id", placementId);
-            command.ExecuteNonQuery();
+            await command.ExecuteNonQueryAsync();
         }
 
-        private static List<PdfTemplateRowMapping> LoadTemplateRows(SqliteConnection connection, int calibrationId)
+        private static async Task<List<PdfTemplateRowMapping>> LoadTemplateRowsAsync(SqliteConnection connection, int calibrationId)
         {
             var rows = new List<PdfTemplateRowMapping>();
             using var command = connection.CreateCommand();
@@ -441,8 +441,8 @@ namespace Ploco.Data
                                     FROM pdf_template_rows
                                     WHERE calibration_id = $id;";
             command.Parameters.AddWithValue("$id", calibrationId);
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
             {
                 rows.Add(new PdfTemplateRowMapping
                 {
@@ -455,7 +455,7 @@ namespace Ploco.Data
             return rows;
         }
 
-        private static List<PdfCalibrationLine> LoadCalibrationLines(SqliteConnection connection, int calibrationId)
+        private static async Task<List<PdfCalibrationLine>> LoadCalibrationLinesAsync(SqliteConnection connection, int calibrationId)
         {
             var lines = new List<PdfCalibrationLine>();
             using var command = connection.CreateCommand();
@@ -463,8 +463,8 @@ namespace Ploco.Data
                                     FROM pdf_calibration_lines
                                     WHERE calibration_id = $id;";
             command.Parameters.AddWithValue("$id", calibrationId);
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
             {
                 lines.Add(new PdfCalibrationLine
                 {
@@ -479,178 +479,189 @@ namespace Ploco.Data
             return lines;
         }
 
-        public AppState LoadState()
+        public async Task<AppState> LoadStateAsync()
         {
             var state = new AppState();
-            using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
 
-            var series = new Dictionary<int, RollingStockSeries>();
-            using (var command = connection.CreateCommand())
+            try
             {
-                command.CommandText = "SELECT id, name, start_number, end_number FROM series;";
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
-                {
-                    var item = new RollingStockSeries
-                    {
-                        Id = reader.GetInt32(0),
-                        Name = reader.GetString(1),
-                        StartNumber = reader.GetInt32(2),
-                        EndNumber = reader.GetInt32(3)
-                    };
-                    series[item.Id] = item;
-                    state.Series.Add(item);
-                }
-            }
+                using var connection = new SqliteConnection(_connectionString);
+                await connection.OpenAsync();
 
-            using (var command = connection.CreateCommand())
-            {
-                command.CommandText = "SELECT id, series_id, number, status, pool, traction_percent, hs_reason, defaut_info, traction_info, maintenance_date, is_forecast_origin, is_forecast_ghost FROM locomotives;";
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
+                var series = new Dictionary<int, RollingStockSeries>();
+                using (var seriesCmd = new SqliteCommand("SELECT id, name, start_number, end_number FROM series;", connection))
                 {
-                    var seriesId = reader.GetInt32(1);
-                    var seriesName = series.TryGetValue(seriesId, out var serie) ? serie.Name : "Serie";
-                    var statusValue = reader.GetString(3);
-                    var status = ParseLocomotiveStatus(statusValue);
-                    state.Locomotives.Add(new LocomotiveModel
+                    using var seriesReader = await seriesCmd.ExecuteReaderAsync();
+                    while (await seriesReader.ReadAsync())
                     {
-                        Id = reader.GetInt32(0),
-                        SeriesId = seriesId,
-                        SeriesName = seriesName,
-                        Number = reader.GetInt32(2),
-                        Status = status,
-                        Pool = reader.IsDBNull(4) ? "Lineas" : reader.GetString(4),
-                        TractionPercent = reader.IsDBNull(5) ? null : reader.GetInt32(5),
-                        HsReason = reader.IsDBNull(6) ? null : reader.GetString(6),
-                        DefautInfo = reader.IsDBNull(7) ? null : reader.GetString(7),
-                        TractionInfo = reader.IsDBNull(8) ? null : reader.GetString(8),
-                        MaintenanceDate = reader.IsDBNull(9) ? null : reader.GetString(9),
-                        IsForecastOrigin = !reader.IsDBNull(10) && reader.GetInt32(10) == 1,
-                        IsForecastGhost = !reader.IsDBNull(11) && reader.GetInt32(11) == 1
-                    });
-                }
-            }
-
-            var tiles = new Dictionary<int, TileModel>();
-            using (var command = connection.CreateCommand())
-            {
-                command.CommandText = "SELECT id, name, type, x, y, config_json FROM tiles;";
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
-                {
-                    var tile = new TileModel
-                    {
-                        Id = reader.GetInt32(0),
-                        Name = reader.GetString(1),
-                        Type = Enum.Parse<TileType>(reader.GetString(2)),
-                        X = reader.GetDouble(3),
-                        Y = reader.GetDouble(4)
-                    };
-
-                    var configJson = reader.IsDBNull(5) ? null : reader.GetString(5);
-                    if (!string.IsNullOrWhiteSpace(configJson))
-                    {
-                        var config = JsonSerializer.Deserialize<TileConfig>(configJson);
-                        if (config != null)
+                        var item = new RollingStockSeries
                         {
-                            tile.LocationPreset = config.LocationPreset;
-                            tile.GarageTrackNumber = config.GarageTrackNumber;
-                            tile.RollingLineCount = config.RollingLineCount;
-                            if (config.Width.HasValue)
+                            Id = seriesReader.GetInt32(0),
+                            Name = seriesReader.GetString(1),
+                            StartNumber = seriesReader.GetInt32(2),
+                            EndNumber = seriesReader.GetInt32(3)
+                        };
+                        series[item.Id] = item;
+                        state.Series.Add(item);
+                    }
+                }
+
+                using (var locoCmd = new SqliteCommand(@"
+                    SELECT l.id, l.series_id, s.name as series_name, l.number, l.status, l.pool, l.traction_percent, l.hs_reason, l.defaut_info, l.traction_info, l.maintenance_date, l.is_forecast_origin, l.is_forecast_ghost
+                    FROM locomotives l 
+                    JOIN series s ON l.series_id = s.id;", connection))
+                {
+                    using var locoReader = await locoCmd.ExecuteReaderAsync();
+                    while (await locoReader.ReadAsync())
+                    {
+                        var seriesId = locoReader.GetInt32(1);
+                        var seriesName = locoReader.GetString(2); // series_name from join
+                        var statusValue = locoReader.GetString(4); // status is at index 4 now
+                        var status = ParseLocomotiveStatus(statusValue);
+                        state.Locomotives.Add(new LocomotiveModel
+                        {
+                            Id = locoReader.GetInt32(0),
+                            SeriesId = seriesId,
+                            SeriesName = seriesName,
+                            Number = locoReader.GetInt32(3), // number is at index 3
+                            Status = status,
+                            Pool = locoReader.IsDBNull(5) ? "Lineas" : locoReader.GetString(5), // pool is at index 5
+                            TractionPercent = locoReader.IsDBNull(6) ? null : locoReader.GetInt32(6), // traction_percent is at index 6
+                            HsReason = locoReader.IsDBNull(7) ? null : locoReader.GetString(7), // hs_reason is at index 7
+                            DefautInfo = locoReader.IsDBNull(8) ? null : locoReader.GetString(8), // defaut_info is at index 8
+                            TractionInfo = locoReader.IsDBNull(9) ? null : locoReader.GetString(9), // traction_info is at index 9
+                            MaintenanceDate = locoReader.IsDBNull(10) ? null : locoReader.GetString(10), // maintenance_date is at index 10
+                            IsForecastOrigin = !locoReader.IsDBNull(11) && locoReader.GetInt32(11) == 1, // is_forecast_origin is at index 11
+                            IsForecastGhost = !locoReader.IsDBNull(12) && locoReader.GetInt32(12) == 1 // is_forecast_ghost is at index 12
+                        });
+                    }
+                }
+
+                var tiles = new Dictionary<int, TileModel>();
+                using (var tilesCmd = new SqliteCommand("SELECT id, name, type, x, y, config_json FROM tiles;", connection))
+                {
+                    using var tilesReader = await tilesCmd.ExecuteReaderAsync();
+                    while (await tilesReader.ReadAsync())
+                    {
+                        var tile = new TileModel
+                        {
+                            Id = tilesReader.GetInt32(0),
+                            Name = tilesReader.GetString(1),
+                            Type = Enum.Parse<TileType>(tilesReader.GetString(2)),
+                            X = tilesReader.GetDouble(3),
+                            Y = tilesReader.GetDouble(4)
+                        };
+
+                        var configJson = tilesReader.IsDBNull(5) ? null : tilesReader.GetString(5);
+                        if (!string.IsNullOrWhiteSpace(configJson))
+                        {
+                            var config = JsonSerializer.Deserialize<TileConfig>(configJson);
+                            if (config != null)
                             {
-                                tile.Width = config.Width.Value;
-                            }
-                            if (config.Height.HasValue)
-                            {
-                                tile.Height = config.Height.Value;
+                                tile.LocationPreset = config.LocationPreset;
+                                tile.GarageTrackNumber = config.GarageTrackNumber;
+                                tile.RollingLineCount = config.RollingLineCount;
+                                if (config.Width.HasValue)
+                                {
+                                    tile.Width = config.Width.Value;
+                                }
+                                if (config.Height.HasValue)
+                                {
+                                    tile.Height = config.Height.Value;
+                                }
                             }
                         }
+
+                        tiles[tile.Id] = tile;
+                        state.Tiles.Add(tile);
                     }
-
-                    tiles[tile.Id] = tile;
-                    state.Tiles.Add(tile);
                 }
-            }
 
-            using (var command = connection.CreateCommand())
-            {
-                command.CommandText = "SELECT id, tile_id, name, position, type, config_json FROM tracks ORDER BY position;";
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
+                using (var tracksCmd = new SqliteCommand("SELECT id, tile_id, name, position, type, config_json FROM tracks ORDER BY position;", connection))
                 {
-                    var track = new TrackModel
+                    using var tracksReader = await tracksCmd.ExecuteReaderAsync();
+                    while (await tracksReader.ReadAsync())
                     {
-                        Id = reader.GetInt32(0),
-                        TileId = reader.GetInt32(1),
-                        Name = reader.GetString(2),
-                        Position = reader.GetInt32(3),
-                        Kind = Enum.TryParse(reader.GetString(4), out TrackKind kind) ? kind : TrackKind.Main
-                    };
-                    var configJson = reader.IsDBNull(5) ? null : reader.GetString(5);
-                    if (!string.IsNullOrWhiteSpace(configJson))
-                    {
-                        var config = JsonSerializer.Deserialize<TrackConfig>(configJson);
-                        if (config != null)
+                        var track = new TrackModel
                         {
-                            track.IsOnTrain = config.IsOnTrain;
-                            track.TrainNumber = config.TrainNumber;
-                            track.StopTime = config.StopTime;
-                            track.IssueReason = config.IssueReason;
-                            track.IsLocomotiveHs = config.IsLocomotiveHs;
-                            track.LeftLabel = config.LeftLabel;
-                            track.RightLabel = config.RightLabel;
-                            track.IsLeftBlocked = config.IsLeftBlocked;
-                            track.IsRightBlocked = config.IsRightBlocked;
+                            Id = tracksReader.GetInt32(0),
+                            TileId = tracksReader.GetInt32(1),
+                            Name = tracksReader.GetString(2),
+                            Position = tracksReader.GetInt32(3),
+                            Kind = Enum.TryParse(tracksReader.GetString(4), out TrackKind kind) ? kind : TrackKind.Main
+                        };
+                        var configJson = tracksReader.IsDBNull(5) ? null : tracksReader.GetString(5);
+                        if (!string.IsNullOrWhiteSpace(configJson))
+                        {
+                            var config = JsonSerializer.Deserialize<TrackConfig>(configJson);
+                            if (config != null)
+                            {
+                                track.IsOnTrain = config.IsOnTrain;
+                                track.TrainNumber = config.TrainNumber;
+                                track.StopTime = config.StopTime;
+                                track.IssueReason = config.IssueReason;
+                                track.IsLocomotiveHs = config.IsLocomotiveHs;
+                                track.LeftLabel = config.LeftLabel;
+                                track.RightLabel = config.RightLabel;
+                                track.IsLeftBlocked = config.IsLeftBlocked;
+                                track.IsRightBlocked = config.IsRightBlocked;
+                            }
+                        }
+                        if (tiles.TryGetValue(track.TileId, out var tile))
+                        {
+                            tile.Tracks.Add(track);
                         }
                     }
-                    if (tiles.TryGetValue(track.TileId, out var tile))
-                    {
-                        tile.Tracks.Add(track);
-                    }
                 }
-            }
 
-            using (var command = connection.CreateCommand())
-            {
-                command.CommandText = "SELECT track_id, loco_id, position, offset_x FROM track_locomotives ORDER BY position;";
-                using var reader = command.ExecuteReader();
-                var locosById = state.Locomotives.ToDictionary(l => l.Id);
-                var tracksById = state.Tiles.SelectMany(t => t.Tracks).ToDictionary(t => t.Id);
-
-                while (reader.Read())
+                using (var tlCmd = new SqliteCommand(@"
+                    SELECT track_id, loco_id, position, offset_x 
+                    FROM track_locomotives 
+                    ORDER BY position;", connection))
                 {
-                    var trackId = reader.GetInt32(0);
-                    var locoId = reader.GetInt32(1);
-                    if (tracksById.TryGetValue(trackId, out var track) && locosById.TryGetValue(locoId, out var loco))
+                    using var tlReader = await tlCmd.ExecuteReaderAsync();
+                    var locosById = state.Locomotives.ToDictionary(l => l.Id);
+                    var tracksById = state.Tiles.SelectMany(t => t.Tracks).ToDictionary(t => t.Id);
+
+                    while (await tlReader.ReadAsync())
                     {
-                        track.Locomotives.Add(loco);
-                        loco.AssignedTrackId = trackId;
-                        var offset = reader.IsDBNull(3) ? (double?)null : reader.GetDouble(3);
-                        loco.AssignedTrackOffsetX = track.Kind == TrackKind.Line || track.Kind == TrackKind.Zone || track.Kind == TrackKind.Output
-                            ? offset
-                            : null;
+                        var trackId = tlReader.GetInt32(0);
+                        var locoId = tlReader.GetInt32(1);
+                        if (tracksById.TryGetValue(trackId, out var track) && locosById.TryGetValue(locoId, out var loco))
+                        {
+                            track.Locomotives.Add(loco);
+                            loco.AssignedTrackId = trackId;
+                            var offset = tlReader.IsDBNull(3) ? (double?)null : tlReader.GetDouble(3);
+                            loco.AssignedTrackOffsetX = track.Kind == TrackKind.Line || track.Kind == TrackKind.Zone || track.Kind == TrackKind.Output
+                                ? offset
+                                : null;
+                        }
                     }
                 }
-            }
 
-            foreach (var tile in state.Tiles)
-            {
-                tile.RefreshTrackCollections();
+                foreach (var tile in state.Tiles)
+                {
+                    tile.RefreshTrackCollections();
+                }
+                return state;
             }
-            return state;
+            finally
+            {
+                sw.Stop();
+                Console.WriteLine($"LoadStateAsync took {sw.ElapsedMilliseconds} ms");
+            }
         }
 
-        public void SeedDefaultDataIfNeeded()
+        public async Task SeedDefaultDataIfNeededAsync()
         {
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            await connection.OpenAsync();
 
             using (var command = connection.CreateCommand())
             {
                 command.CommandText = "SELECT COUNT(*) FROM series;";
-                var count = (long)command.ExecuteScalar()!;
+                var count = (long)(await command.ExecuteScalarAsync())!;
                 if (count > 0)
                 {
                     return;
@@ -658,8 +669,8 @@ namespace Ploco.Data
             }
 
             using var transaction = connection.BeginTransaction();
-            var seriesId = InsertSeries(connection, "1300", 1301, 1349);
-            InsertSeries(connection, "37000", 37001, 37040);
+            var seriesId = await InsertSeriesAsync(connection, "1300", 1301, 1349);
+            await InsertSeriesAsync(connection, "37000", 37001, 37040);
 
             using (var insertLoco = connection.CreateCommand())
             {
@@ -690,22 +701,22 @@ namespace Ploco.Data
             transaction.Commit();
         }
 
-        public void SaveState(AppState state)
+        public async Task SaveStateAsync(AppState state)
         {
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            await connection.OpenAsync();
             using var transaction = connection.BeginTransaction();
 
-            ExecuteNonQuery(connection, "DELETE FROM track_locomotives;");
-            ExecuteNonQuery(connection, "DELETE FROM tracks;");
-            ExecuteNonQuery(connection, "DELETE FROM tiles;");
-            ExecuteNonQuery(connection, "DELETE FROM locomotives;");
-            ExecuteNonQuery(connection, "DELETE FROM series;");
+            await ExecuteNonQueryAsync(connection, "DELETE FROM track_locomotives;");
+            await ExecuteNonQueryAsync(connection, "DELETE FROM tracks;");
+            await ExecuteNonQueryAsync(connection, "DELETE FROM tiles;");
+            await ExecuteNonQueryAsync(connection, "DELETE FROM locomotives;");
+            await ExecuteNonQueryAsync(connection, "DELETE FROM series;");
 
             var seriesIdMap = new Dictionary<int, int>();
             foreach (var series in state.Series)
             {
-                var newId = InsertSeries(connection, series.Name, series.StartNumber, series.EndNumber);
+                var newId = await InsertSeriesAsync(connection, series.Name, series.StartNumber, series.EndNumber);
                 seriesIdMap[series.Id] = newId;
                 series.Id = newId;
             }
@@ -729,8 +740,8 @@ namespace Ploco.Data
                 command.Parameters.AddWithValue("$maintenance", string.IsNullOrWhiteSpace(loco.MaintenanceDate) ? DBNull.Value : loco.MaintenanceDate);
                 command.Parameters.AddWithValue("$isOrigin", loco.IsForecastOrigin ? 1 : 0);
                 command.Parameters.AddWithValue("$isGhost", loco.IsForecastGhost ? 1 : 0);
-                command.ExecuteNonQuery();
-                loco.Id = GetLastInsertRowId(connection);
+                await command.ExecuteNonQueryAsync();
+                loco.Id = await GetLastInsertRowIdAsync(connection);
             }
 
             foreach (var tile in state.Tiles)
@@ -750,8 +761,8 @@ namespace Ploco.Data
                     Height = tile.Height
                 });
                 command.Parameters.AddWithValue("$config", configJson);
-                command.ExecuteNonQuery();
-                tile.Id = GetLastInsertRowId(connection);
+                await command.ExecuteNonQueryAsync();
+                tile.Id = await GetLastInsertRowIdAsync(connection);
 
                 var trackPosition = 0;
                 foreach (var track in tile.Tracks)
@@ -783,8 +794,8 @@ namespace Ploco.Data
                         ? trackConfigJson
                         : DBNull.Value;
                     trackCommand.Parameters.AddWithValue("$config", configValue);
-                    trackCommand.ExecuteNonQuery();
-                    track.Id = GetLastInsertRowId(connection);
+                    await trackCommand.ExecuteNonQueryAsync();
+                    track.Id = await GetLastInsertRowIdAsync(connection);
 
                     var locoPosition = 0;
                     foreach (var loco in track.Locomotives)
@@ -798,7 +809,7 @@ namespace Ploco.Data
                             ? (object?)loco.AssignedTrackOffsetX ?? DBNull.Value
                             : DBNull.Value;
                         assignCommand.Parameters.AddWithValue("$offsetX", offsetValue);
-                        assignCommand.ExecuteNonQuery();
+                        await assignCommand.ExecuteNonQueryAsync();
                     }
                 }
             }
@@ -807,27 +818,27 @@ namespace Ploco.Data
             transaction.Commit();
         }
 
-        public void AddHistory(string action, string details)
+        public async Task AddHistoryAsync(string action, string details)
         {
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            await connection.OpenAsync();
             using var command = connection.CreateCommand();
             command.CommandText = "INSERT INTO history (timestamp, action, details) VALUES ($timestamp, $action, $details);";
             command.Parameters.AddWithValue("$timestamp", DateTime.UtcNow.ToString("O"));
             command.Parameters.AddWithValue("$action", action);
             command.Parameters.AddWithValue("$details", details);
-            command.ExecuteNonQuery();
+            await command.ExecuteNonQueryAsync();
         }
 
-        private static int InsertSeries(SqliteConnection connection, string name, int startNumber, int endNumber)
+        private static async Task<int> InsertSeriesAsync(SqliteConnection connection, string name, int startNumber, int endNumber)
         {
             using var command = connection.CreateCommand();
             command.CommandText = "INSERT INTO series (name, start_number, end_number) VALUES ($name, $start, $end);";
             command.Parameters.AddWithValue("$name", name);
             command.Parameters.AddWithValue("$start", startNumber);
             command.Parameters.AddWithValue("$end", endNumber);
-            command.ExecuteNonQuery();
-            return GetLastInsertRowId(connection);
+            await command.ExecuteNonQueryAsync();
+            return await GetLastInsertRowIdAsync(connection);
         }
 
         private static LocomotiveStatus ParseLocomotiveStatus(string value)
@@ -851,117 +862,110 @@ namespace Ploco.Data
             return LocomotiveStatus.Ok;
         }
 
-        private static void ExecuteNonQuery(SqliteConnection connection, string sql)
+        private static async Task ExecuteNonQueryAsync(SqliteConnection connection, string sql)
         {
             using var command = connection.CreateCommand();
             command.CommandText = sql;
-            command.ExecuteNonQuery();
+            await command.ExecuteNonQueryAsync();
         }
 
-        public List<HistoryEntry> LoadHistory()
+        public async Task<List<HistoryEntry>> LoadHistoryAsync()
         {
             var history = new List<HistoryEntry>();
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            await connection.OpenAsync();
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT timestamp, action, details FROM history ORDER BY timestamp DESC;";
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
+            command.CommandText = "SELECT id, timestamp, action, details FROM history ORDER BY id DESC LIMIT 50;";
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
             {
                 history.Add(new HistoryEntry
                 {
-                    Timestamp = DateTime.Parse(reader.GetString(0)),
-                    Action = reader.GetString(1),
-                    Details = reader.GetString(2)
+                    Id = reader.GetInt32(0),
+                    Timestamp = DateTime.Parse(reader.GetString(1)),
+                    Action = reader.GetString(2),
+                    Details = reader.GetString(3)
                 });
             }
-
             return history;
         }
 
-        public Dictionary<string, int> GetTableCounts()
+        public async Task<Dictionary<string, int>> GetTableCountsAsync()
         {
-            var tables = new[]
-            {
-                "series",
-                "locomotives",
-                "tiles",
-                "tracks",
-                "track_locomotives",
-                "history",
-                "places"
-            };
-
-            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var counts = new Dictionary<string, int>();
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            await connection.OpenAsync();
+            var tables = new[] { "series", "locomotives", "tiles", "tracks", "track_locomotives", "history", "places", "pdf_documents", "pdf_template_calibrations", "pdf_template_rows", "pdf_calibration_lines", "pdf_placements" };
+
             foreach (var table in tables)
             {
                 using var command = connection.CreateCommand();
                 command.CommandText = $"SELECT COUNT(*) FROM {table};";
-                var count = Convert.ToInt32(command.ExecuteScalar());
-                result[table] = count;
+                counts[table] = Convert.ToInt32(await command.ExecuteScalarAsync());
             }
 
-            return result;
+            return counts;
         }
 
-        public Dictionary<TrackKind, int> GetTrackKindCounts()
+        public async Task<Dictionary<TrackKind, int>> GetTrackKindCountsAsync()
         {
-            var result = new Dictionary<TrackKind, int>();
+            var counts = new Dictionary<TrackKind, int>();
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            await connection.OpenAsync();
+
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT type, COUNT(*) FROM tracks GROUP BY type;";
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
             {
                 var kindText = reader.GetString(0);
                 if (Enum.TryParse(kindText, out TrackKind kind))
                 {
-                    result[kind] = reader.GetInt32(1);
+                    counts[kind] = reader.GetInt32(1);
                 }
             }
 
-            return result;
+            return counts;
         }
 
-        public void ClearHistory()
+        public async Task ClearHistoryAsync()
         {
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
-            ExecuteNonQuery(connection, "DELETE FROM history;");
+            await connection.OpenAsync();
+            await ExecuteNonQueryAsync(connection, "DELETE FROM history;");
         }
 
-        public void ResetOperationalState()
+        public async Task ResetOperationalStateAsync()
         {
             using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            await connection.OpenAsync();
             using var transaction = connection.BeginTransaction();
 
             using (var command = connection.CreateCommand())
             {
                 command.CommandText = "UPDATE locomotives SET traction_percent = NULL, hs_reason = NULL;";
-                command.ExecuteNonQuery();
+                await command.ExecuteNonQueryAsync();
             }
 
             using (var command = connection.CreateCommand())
             {
                 command.CommandText = "UPDATE tracks SET config_json = NULL WHERE type = 'Line';";
-                command.ExecuteNonQuery();
+                await command.ExecuteNonQueryAsync();
             }
 
             transaction.Commit();
         }
 
-        public void CopyDatabaseTo(string destinationPath)
+        public Task CopyDatabaseToAsync(string destinationPath)
         {
             if (string.IsNullOrWhiteSpace(destinationPath))
             {
-                return;
+                return Task.CompletedTask;
             }
 
             System.IO.File.Copy(_databasePath, destinationPath, true);
+            return Task.CompletedTask;
         }
 
         public bool ReplaceDatabaseWith(string sourcePath)
@@ -982,11 +986,11 @@ namespace Ploco.Data
             return true;
         }
 
-        private static int GetLastInsertRowId(SqliteConnection connection)
+        private static async Task<int> GetLastInsertRowIdAsync(SqliteConnection connection)
         {
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT last_insert_rowid();";
-            return Convert.ToInt32(command.ExecuteScalar());
+            return Convert.ToInt32(await command.ExecuteScalarAsync());
         }
 
         private static void EnsureColumn(SqliteConnection connection, string tableName, string columnName, string columnDefinition)
@@ -1040,22 +1044,15 @@ namespace Ploco.Data
             return headerText.StartsWith("SQLite format 3");
         }
 
-        private static void SavePlaces(SqliteConnection connection, IEnumerable<TileModel> tiles)
+        private static async void SavePlaces(SqliteConnection connection, IEnumerable<TileModel> tiles)
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = "INSERT OR IGNORE INTO places (type, name) VALUES ($type, $name);";
-            var typeParameter = command.CreateParameter();
-            typeParameter.ParameterName = "$type";
-            command.Parameters.Add(typeParameter);
-            var nameParameter = command.CreateParameter();
-            nameParameter.ParameterName = "$name";
-            command.Parameters.Add(nameParameter);
-
+            const string cmdText = "INSERT OR IGNORE INTO places (type, name) VALUES ($type, $name);";
             foreach (var tile in tiles)
             {
-                typeParameter.Value = tile.Type.ToString();
-                nameParameter.Value = tile.Name;
-                command.ExecuteNonQuery();
+                using var command = new SqliteCommand(cmdText, connection);
+                command.Parameters.AddWithValue("$type", tile.Type.ToString());
+                command.Parameters.AddWithValue("$name", tile.Name);
+                await command.ExecuteNonQueryAsync();
             }
         }
 

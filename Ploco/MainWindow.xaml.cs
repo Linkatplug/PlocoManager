@@ -45,7 +45,7 @@ namespace Ploco
             DataContext = _viewModel;
             
             _repository = App.ServiceProvider.GetRequiredService<IPlocoRepository>();
-            _viewModel.InitializeEvents(PersistState, LoadState);
+            _viewModel.InitializeEvents(PersistState, async () => await LoadStateAsync());
             _viewModel.RequestLocomotiveListRefresh += RefreshLocomotivesDisplay;
             _viewModel.OnWorkspaceChanged += RefreshTapisT13;
             
@@ -57,17 +57,17 @@ namespace Ploco
             Logger.Info("Application starting", "Application");
         }
 
-        private void Window_Loaded(object sender, RoutedEventArgs e)
+        private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
             Logger.Info("Main window loaded", "Application");
             
             // Restore window settings
             WindowSettingsHelper.RestoreWindowSettings(this, "MainWindow");
             
-            _repository.Initialize();
-            _repository.SeedDefaultDataIfNeeded();
+            await _repository.InitializeAsync();
+            await _repository.SeedDefaultDataIfNeededAsync();
 
-            LoadState();
+            await LoadStateAsync();
             LoadLayoutPresets();
             RefreshPresetMenu();
             ApplyTheme(false);
@@ -104,12 +104,12 @@ namespace Ploco
             Logger.Shutdown();
         }
 
-        private void LoadState()
+        private async Task LoadStateAsync()
         {
             _viewModel.Locomotives.Clear();
             _viewModel.Tiles.Clear();
 
-            var state = _repository.LoadState();
+            var state = await _repository.LoadStateAsync();
             foreach (var loco in state.Locomotives.OrderBy(l => l.SeriesName).ThenBy(l => l.Number))
             {
                 if (!loco.IsForecastGhost)
@@ -213,7 +213,8 @@ namespace Ploco
                 Locomotives = locomotivesToSave,
                 Tiles = tilesToSave
             };
-            _repository.SaveState(state);
+            // PersistState est synchrone historiquement (événement de fermeture/autre), on le lance sans attendre si on ne peut pas l'attendre.
+            _ = _repository.SaveStateAsync(state);
         }
 
         private void InitializeLocomotiveView()
@@ -246,27 +247,27 @@ namespace Ploco
             return series.Values.ToList();
         }
 
-        private void ToggleLeftBlocked_Click(object sender, RoutedEventArgs e)
+        private async void ToggleLeftBlocked_Click(object sender, RoutedEventArgs e)
         {
             if (sender is Button button && button.DataContext is TrackModel track)
             {
                 track.IsLeftBlocked = !track.IsLeftBlocked;
-                _repository.AddHistory("ZoneBlockedUpdated", $"Mise à jour du remplissage BLOCK pour {track.Name}.");
+                await _repository.AddHistoryAsync("ZoneBlockedUpdated", $"Mise à jour du remplissage BLOCK pour {track.Name}.");
                 PersistState();
             }
         }
 
-        private void ToggleRightBlocked_Click(object sender, RoutedEventArgs e)
+        private async void ToggleRightBlocked_Click(object sender, RoutedEventArgs e)
         {
             if (sender is Button button && button.DataContext is TrackModel track)
             {
                 track.IsRightBlocked = !track.IsRightBlocked;
-                _repository.AddHistory("ZoneBlockedUpdated", $"Mise à jour du remplissage BIF pour {track.Name}.");
+                await _repository.AddHistoryAsync("ZoneBlockedUpdated", $"Mise à jour du remplissage BIF pour {track.Name}.");
                 PersistState();
             }
         }
 
-        private void RemoveLocomotiveFromTrack(LocomotiveModel loco)
+        private async Task RemoveLocomotiveFromTrackAsync(LocomotiveModel loco)
         {
             var track = _viewModel.Tiles.SelectMany(t => t.Tracks).FirstOrDefault(t => t.Locomotives.Contains(loco));
             if (track != null)
@@ -274,7 +275,7 @@ namespace Ploco
                 track.Locomotives.Remove(loco);
                 loco.AssignedTrackId = null;
                 loco.AssignedTrackOffsetX = null;
-                _repository.AddHistory("LocomotiveRemoved", $"Loco {loco.Number} retirée de {track.Name}.");
+                await _repository.AddHistoryAsync("LocomotiveRemoved", $"Loco {loco.Number} retirée de {track.Name}.");
             }
         }
 
@@ -292,7 +293,7 @@ namespace Ploco
             }
         }
 
-        private void HandleLocomotiveStatusChange(LocomotiveModel loco)
+        private async void HandleLocomotiveStatusChange(LocomotiveModel loco)
         {
             var oldStatus = loco.Status;
             Logger.Debug($"Opening status dialog for loco {loco.Number} (current status: {oldStatus})", "Status");
@@ -301,7 +302,7 @@ namespace Ploco
             if (dialog.ShowDialog() == true)
             {
                 Logger.Info($"Status changed for loco {loco.Number}: {oldStatus} -> {loco.Status}", "Status");
-                _repository.AddHistory("StatusChanged", $"Statut modifié pour {loco.Number}.");
+                await _repository.AddHistoryAsync("StatusChanged", $"Statut modifié pour {loco.Number}.");
                 PersistState();
                 RefreshTapisT13();
             }
@@ -329,12 +330,12 @@ namespace Ploco
             }
         }
 
-        private void MenuItem_RemoveFromTile_Click(object sender, RoutedEventArgs e)
+        private async void MenuItem_RemoveFromTile_Click(object sender, RoutedEventArgs e)
         {
             var loco = GetLocomotiveFromMenuItem(sender);
             if (loco != null)
             {
-                RemoveLocomotiveFromTrack(loco);
+                await RemoveLocomotiveFromTrackAsync(loco);
                 _viewModel.UpdatePoolVisibility();
                 PersistState();
                 RefreshTapisT13();
@@ -468,7 +469,7 @@ namespace Ploco
                 lineasLoco.AssignedTrackOffsetX = null;
             }
 
-            _repository.AddHistory("LocomotiveSwapped",
+            _ = _repository.AddHistoryAsync("LocomotiveSwapped",
                 $"Swap Sibelit {sibelitLoco.Number} ↔ Lineas {lineasLoco.Number}.");
             _viewModel.UpdatePoolVisibility();
             PersistState();
@@ -517,12 +518,12 @@ namespace Ploco
             return null;
         }
 
-        private void MarkLocomotiveHs(LocomotiveModel loco)
+        private async void MarkLocomotiveHs(LocomotiveModel loco)
         {
             var dialog = new StatusDialog(loco, LocomotiveStatus.HS) { Owner = this };
             if (dialog.ShowDialog() == true)
             {
-                _repository.AddHistory("StatusChanged", $"Statut modifié pour {loco.Number} (HS).");
+                await _repository.AddHistoryAsync("StatusChanged", $"Statut modifié pour {loco.Number} (HS).");
                 PersistState();
                 RefreshTapisT13();
             }
@@ -610,12 +611,12 @@ namespace Ploco
             UpdateTileCanvasExtent();
         }
 
-        private void Tile_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        private async void Tile_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
             if (_draggedTile != null)
             {
                 ResolveTileOverlap(_draggedTile);
-                _repository.AddHistory("TileMoved", $"Tuile {_draggedTile.Name} déplacée.");
+                await _repository.AddHistoryAsync("TileMoved", $"Tuile {_draggedTile.Name} déplacée.");
                 PersistState();
                 UpdateTileCanvasExtent();
             }
@@ -637,13 +638,13 @@ namespace Ploco
             }
         }
 
-        private void TileResizeThumb_DragCompleted(object sender, DragCompletedEventArgs e)
+        private async void TileResizeThumb_DragCompleted(object sender, DragCompletedEventArgs e)
         {
             _isResizingTile = false;
             if (sender is Thumb thumb && thumb.DataContext is TileModel tile)
             {
                 ResolveTileOverlap(tile);
-                _repository.AddHistory("TileResized", $"Tuile {tile.Name} redimensionnée.");
+                await _repository.AddHistoryAsync("TileResized", $"Tuile {tile.Name} redimensionnée.");
                 PersistState();
                 UpdateTileCanvasExtent();
             }
@@ -678,9 +679,9 @@ namespace Ploco
             RefreshTapisT13();
         }
 
-        private void MenuItem_History_Click(object sender, RoutedEventArgs e)
+        private async void MenuItem_History_Click(object sender, RoutedEventArgs e)
         {
-            var history = _repository.LoadHistory();
+            var history = await _repository.LoadHistoryAsync();
             var dialog = new HistoriqueWindow(history) { Owner = this };
             dialog.ShowDialog();
         }
@@ -700,7 +701,7 @@ namespace Ploco
             OpenModelessWindow(() => new DatabaseManagementWindow(_repository, _viewModel.Locomotives, _viewModel.Tiles));
         }
 
-        private void MenuItem_ResetLocomotives_Click(object sender, RoutedEventArgs e)
+        private async void MenuItem_ResetLocomotives_Click(object sender, RoutedEventArgs e)
         {
             var result = MessageBox.Show("Réinitialiser toutes les locomotives ?", "Réinitialisation des locomotives", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (result != MessageBoxResult.Yes)
@@ -725,7 +726,7 @@ namespace Ploco
                 loco.Pool = "Lineas";
             }
 
-            _repository.AddHistory("ResetLocomotives", "Réinitialisation des locomotives.");
+            await _repository.AddHistoryAsync("ResetLocomotives", "Réinitialisation des locomotives.");
             _viewModel.UpdatePoolVisibility();
             PersistState();
             RefreshTapisT13();
@@ -733,7 +734,7 @@ namespace Ploco
             Logger.Info($"All locomotives reset successfully ({_viewModel.Locomotives.Count} locomotives)", "Reset");
         }
 
-        private void MenuItem_ResetTiles_Click(object sender, RoutedEventArgs e)
+        private async void MenuItem_ResetTiles_Click(object sender, RoutedEventArgs e)
         {
             var result = MessageBox.Show("Supprimer toutes les tuiles ?", "Réinitialisation des tuiles", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (result != MessageBoxResult.Yes)
@@ -757,7 +758,7 @@ namespace Ploco
             }
 
             _viewModel.Tiles.Clear();
-            _repository.AddHistory("ResetTiles", "Suppression de toutes les tuiles.");
+            await _repository.AddHistoryAsync("ResetTiles", "Suppression de toutes les tuiles.");
             _viewModel.UpdatePoolVisibility();
             PersistState();
             RefreshTapisT13();
@@ -867,7 +868,7 @@ namespace Ploco
             e.Handled = true;
         }
 
-        private void SaveLayoutPreset_Click(object sender, RoutedEventArgs e)
+        private async void SaveLayoutPreset_Click(object sender, RoutedEventArgs e)
         {
             var dialog = new SimpleTextDialog("Enregistrer un preset", "Nom du preset :", "Nouveau preset") { Owner = this };
             if (dialog.ShowDialog() != true)
@@ -891,10 +892,10 @@ namespace Ploco
             _viewModel.LayoutPresets.Add(preset);
             SaveLayoutPresets();
             RefreshPresetMenu();
-            _repository.AddHistory("LayoutPresetSaved", $"Preset enregistré : {name}.");
+            await _repository.AddHistoryAsync("LayoutPresetSaved", $"Preset enregistré : {name}.");
         }
 
-        private void LoadLayoutPreset_Click(object sender, RoutedEventArgs e)
+        private async void LoadLayoutPreset_Click(object sender, RoutedEventArgs e)
         {
             if (sender is not MenuItem menuItem || menuItem.Tag is not LayoutPreset preset)
             {
@@ -902,12 +903,12 @@ namespace Ploco
             }
 
             ApplyLayoutPreset(preset);
-            _repository.AddHistory("LayoutPresetLoaded", $"Preset chargé : {preset.Name}.");
+            await _repository.AddHistoryAsync("LayoutPresetLoaded", $"Preset chargé : {preset.Name}.");
             _viewModel.UpdatePoolVisibility();
             PersistState();
         }
 
-        private void DeleteLayoutPreset_Click(object sender, RoutedEventArgs e)
+        private async void DeleteLayoutPreset_Click(object sender, RoutedEventArgs e)
         {
             if (sender is not MenuItem menuItem || menuItem.Tag is not LayoutPreset preset)
             {
@@ -924,7 +925,7 @@ namespace Ploco
             _viewModel.LayoutPresets.Remove(preset);
             SaveLayoutPresets();
             RefreshPresetMenu();
-            _repository.AddHistory("LayoutPresetDeleted", $"Preset supprimé : {preset.Name}.");
+            await _repository.AddHistoryAsync("LayoutPresetDeleted", $"Preset supprimé : {preset.Name}.");
         }
 
         private void ApplyGaragePresets(TileModel tile)

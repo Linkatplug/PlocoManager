@@ -8,7 +8,7 @@ namespace Ploco.ViewModels
     public partial class MainViewModel
     {
         [RelayCommand]
-        public void DropLocomotive(LocomotiveDropArgs args)
+        public async Task DropLocomotiveAsync(LocomotiveDropArgs args)
         {
             if (args?.Loco == null || args.Target == null) return;
 
@@ -18,7 +18,7 @@ namespace Ploco.ViewModels
             {
                 if (args.Target is TrackModel track)
                 {
-                    TryMoveLocomotiveToTrack(loco, track);
+                    await TryMoveLocomotiveToTrackAsync(loco, track);
                 }
                 return;
             }
@@ -51,14 +51,14 @@ namespace Ploco.ViewModels
             }
             else if (args.Target is MainViewModel) // Pool
             {
-                RemoveLocomotiveFromTrack(loco);
+                await RemoveLocomotiveFromTrackAsync(loco);
             }
 
             OnStatePersisted?.Invoke();
             OnWorkspaceChanged?.Invoke();
         }
 
-        private void RemoveLocomotiveFromTrack(LocomotiveModel loco)
+        private async Task RemoveLocomotiveFromTrackAsync(LocomotiveModel loco)
         {
             var track = Tiles.SelectMany(t => t.Tracks).FirstOrDefault(t => t.Locomotives.Contains(loco));
             if (track != null)
@@ -66,7 +66,7 @@ namespace Ploco.ViewModels
                 track.Locomotives.Remove(loco);
                 loco.AssignedTrackId = null;
                 loco.AssignedTrackOffsetX = null;
-                _repository.AddHistory("LocomotiveRemoved", $"Loco {loco.Number} retirée de {track.Name}.");
+                await _repository.AddHistoryAsync("LocomotiveRemoved", $"Loco {loco.Number} retirée de {track.Name}.");
                 UpdatePoolVisibility();
             }
         }
@@ -100,7 +100,7 @@ namespace Ploco.ViewModels
             PlacementLogicHelper.EnsureTrackOffsets(track);
         }
 
-        private void TryMoveLocomotiveToTrack(LocomotiveModel loco, TrackModel targetTrack)
+        private async Task TryMoveLocomotiveToTrackAsync(LocomotiveModel loco, TrackModel targetTrack)
         {
             if (!LocomotiveStateHelper.CanDropLocomotiveOnTrack(loco, targetTrack))
             {

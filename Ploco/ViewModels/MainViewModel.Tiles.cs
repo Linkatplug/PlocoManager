@@ -21,7 +21,7 @@ namespace Ploco.ViewModels
         }
 
         [RelayCommand]
-        public void AddTile()
+        public async Task AddTileAsync()
         {
             var (success, type, name) = _dialogService.ShowPlaceDialog();
             if (!success || type == null)
@@ -34,22 +34,22 @@ namespace Ploco.ViewModels
                 var (lineSuccess, lineResult) = _dialogService.ShowLinePlaceDialog(name);
                 if (lineSuccess && lineResult != null)
                 {
-                    AddLineTile(lineResult);
+                    await AddLineTileAsync(lineResult);
                 }
                 return;
             }
 
             if (type == TileType.RollingLine)
             {
-                AddRollingLineTile(name);
+                await AddRollingLineTileAsync(name);
                 return;
             }
 
-            AddTileInternal(type.Value, name);
+            await AddTileInternalAsync(type.Value, name);
         }
 
         [RelayCommand]
-        public void RenameTile(TileModel tile)
+        public async Task RenameTileAsync(TileModel tile)
         {
             if (tile == null) return;
 
@@ -57,13 +57,13 @@ namespace Ploco.ViewModels
             if (success)
             {
                 tile.Name = result;
-                _repository.AddHistory("TileRenamed", $"Tuile renommée en {tile.Name}.");
+                await _repository.AddHistoryAsync("TileRenamed", $"Tuile renommée en {tile.Name}.");
                 OnStatePersisted?.Invoke();
             }
         }
 
         [RelayCommand]
-        public void DeleteTile(TileModel tile)
+        public async Task DeleteTileAsync(TileModel tile)
         {
             if (tile == null) return;
 
@@ -76,14 +76,14 @@ namespace Ploco.ViewModels
                 }
             }
             Tiles.Remove(tile);
-            _repository.AddHistory("TileDeleted", $"Suppression du lieu {tile.DisplayTitle}.");
+            await _repository.AddHistoryAsync("TileDeleted", $"Suppression du lieu {tile.DisplayTitle}.");
             UpdatePoolVisibility();
             OnStatePersisted?.Invoke();
             OnWorkspaceChanged?.Invoke();
         }
 
         [RelayCommand]
-        public void AddDepotOutputTrack(TileModel tile)
+        public async Task AddDepotOutputTrackAsync(TileModel tile)
         {
             if (tile == null) return;
             if (tile.OutputTracks.Any())
@@ -94,13 +94,13 @@ namespace Ploco.ViewModels
             var track = new TrackModel { Name = "Voie de sortie", Kind = TrackKind.Output };
             tile.Tracks.Add(track);
             tile.RefreshTrackCollections();
-            _repository.AddHistory("TrackAdded", $"Ajout de la voie de sortie dans {tile.DisplayTitle}.");
+            await _repository.AddHistoryAsync("TrackAdded", $"Ajout de la voie de sortie dans {tile.DisplayTitle}.");
             OnStatePersisted?.Invoke();
             OnWorkspaceChanged?.Invoke();
         }
 
         [RelayCommand]
-        public void AddZoneTrack(TileModel tile)
+        public async Task AddZoneTrackAsync(TileModel tile)
         {
             if (tile == null) return;
             var (success, name) = _dialogService.ShowSimpleTextDialog("Ajouter une zone", "Nom de zone :", "Zone 1");
@@ -109,14 +109,14 @@ namespace Ploco.ViewModels
                 var track = new TrackModel { Name = name, Kind = TrackKind.Zone };
                 tile.Tracks.Add(track);
                 tile.RefreshTrackCollections();
-                _repository.AddHistory("ZoneAdded", $"Ajout de la zone {track.Name} dans {tile.DisplayTitle}.");
+                await _repository.AddHistoryAsync("ZoneAdded", $"Ajout de la zone {track.Name} dans {tile.DisplayTitle}.");
                 OnStatePersisted?.Invoke();
                 OnWorkspaceChanged?.Invoke();
             }
         }
 
         [RelayCommand]
-        public void AddLineTrack(TileModel tile)
+        public async Task AddLineTrackAsync(TileModel tile)
         {
             if (tile == null) return;
             var (success, track) = _dialogService.ShowLineTrackDialog();
@@ -125,14 +125,14 @@ namespace Ploco.ViewModels
                 track.Kind = TrackKind.Line;
                 tile.Tracks.Add(track);
                 tile.RefreshTrackCollections();
-                _repository.AddHistory("LineTrackAdded", $"Ajout de la voie {track.Name} dans {tile.DisplayTitle}.");
+                await _repository.AddHistoryAsync("LineTrackAdded", $"Ajout de la voie {track.Name} dans {tile.DisplayTitle}.");
                 OnStatePersisted?.Invoke();
                 OnWorkspaceChanged?.Invoke();
             }
         }
 
         [RelayCommand]
-        public void ConfigureRollingLineTracks(TileModel tile)
+        public async Task ConfigureRollingLineTracksAsync(TileModel tile)
         {
             if (tile == null || tile.Type != TileType.RollingLine) return;
             var currentNumbers = ResolveRollingLineNumbers(tile);
@@ -146,26 +146,26 @@ namespace Ploco.ViewModels
             }
             tile.RollingLineCount = adjustedNumbers.Count;
             NormalizeRollingLineTracks(tile, adjustedNumbers);
-            _repository.AddHistory("RollingLineAdded", $"Configuration des lignes ({FormatRollingLineRange(adjustedNumbers)}) dans {tile.DisplayTitle}.");
+            await _repository.AddHistoryAsync("RollingLineAdded", $"Configuration des lignes ({FormatRollingLineRange(adjustedNumbers)}) dans {tile.DisplayTitle}.");
             OnStatePersisted?.Invoke();
             OnWorkspaceChanged?.Invoke();
         }
 
         [RelayCommand]
-        public void RenameTrack(TrackModel track)
+        public async Task RenameTrackAsync(TrackModel track)
         {
             if (track == null) return;
             var (success, name) = _dialogService.ShowSimpleTextDialog("Renommer la voie", "Nouveau nom :", track.Name);
             if (success)
             {
                 track.Name = name;
-                _repository.AddHistory("TrackRenamed", $"Voie renommée en {track.Name}.");
+                await _repository.AddHistoryAsync("TrackRenamed", $"Voie renommée en {track.Name}.");
                 OnStatePersisted?.Invoke();
             }
         }
 
         [RelayCommand]
-        public void DeleteTrack(TrackModel track)
+        public async Task DeleteTrackAsync(TrackModel track)
         {
             if (track == null) return;
             var tile = Tiles.FirstOrDefault(t => t.Tracks.Contains(track));
@@ -178,14 +178,14 @@ namespace Ploco.ViewModels
             }
             tile.Tracks.Remove(track);
             tile.RefreshTrackCollections();
-            _repository.AddHistory("TrackRemoved", $"Suppression de la voie {track.Name} dans {tile.DisplayTitle}.");
+            await _repository.AddHistoryAsync("TrackRemoved", $"Suppression de la voie {track.Name} dans {tile.DisplayTitle}.");
             OnStatePersisted?.Invoke();
             OnWorkspaceChanged?.Invoke();
         }
 
         // --- Helper Methods ---
 
-        private void AddTileInternal(TileType type, string name)
+        private async Task AddTileInternalAsync(TileType type, string name)
         {
             var tile = new TileModel
             {
@@ -197,12 +197,12 @@ namespace Ploco.ViewModels
             EnsureDefaultTracks(tile);
             ApplyGaragePresets(tile);
             Tiles.Add(tile);
-            _repository.AddHistory("TileCreated", $"Création du lieu {tile.DisplayTitle}.");
+            await _repository.AddHistoryAsync("TileCreated", $"Création du lieu {tile.DisplayTitle}.");
             OnStatePersisted?.Invoke();
             OnWorkspaceChanged?.Invoke();
         }
 
-        private void AddLineTile(LinePlaceDialogResult dialog)
+        private async Task AddLineTileAsync(LinePlaceDialogResult dialog)
         {
             var tile = new TileModel
             {
@@ -226,8 +226,8 @@ namespace Ploco.ViewModels
             tile.Tracks.Add(track);
             tile.RefreshTrackCollections();
             Tiles.Add(tile);
-            _repository.AddHistory("TileCreated", $"Création du lieu {tile.DisplayTitle}.");
-            _repository.AddHistory("LineTrackAdded", $"Ajout de la voie {track.Name} dans {tile.DisplayTitle}.");
+            await _repository.AddHistoryAsync("TileCreated", $"Création du lieu {tile.DisplayTitle}.");
+            await _repository.AddHistoryAsync("LineTrackAdded", $"Ajout de la voie {track.Name} dans {tile.DisplayTitle}.");
 
             var missingLocos = new List<string>();
             var unavailableLocos = new List<string>();
@@ -273,7 +273,7 @@ namespace Ploco.ViewModels
                     if (loco.Status != LocomotiveStatus.HS)
                     {
                         loco.Status = LocomotiveStatus.HS;
-                        _repository.AddHistory("StatusChanged", $"Statut modifié pour {loco.Number} (HS).");
+                        await _repository.AddHistoryAsync("StatusChanged", $"Statut modifié pour {loco.Number} (HS).");
                     }
                 }
             }
@@ -348,7 +348,10 @@ namespace Ploco.ViewModels
                     var parentTile = Tiles.FirstOrDefault(t => t.Tracks.Contains(currentTrack));
                     if (parentTile != null && parentTile.Type == TileType.ArretLigne)
                     {
-                        DeleteTile(parentTile);
+                         // We must bypass awaiting the RelayCommand here if it becomes async
+                         // because MoveLocomotiveToTrack remains synchronous since it's fundamentally UI layout operations.
+                         // But we should use the new Async name to trigger the Task cleanly.
+                        _ = DeleteTileAsync(parentTile);
                         Helpers.Logger.Debug($"Auto-deleted empty line place {parentTile.Name}", "Movement");
                     }
                 }
@@ -394,7 +397,7 @@ namespace Ploco.ViewModels
             return numbers;
         }
 
-        private void AddRollingLineTile(string name)
+        private async Task AddRollingLineTileAsync(string name)
         {
             var numbers = _dialogService.ShowRollingLineRangeDialog(DefaultRollingLineCount);
             if (numbers == null) return;
@@ -410,8 +413,8 @@ namespace Ploco.ViewModels
 
             NormalizeRollingLineTracks(tile, numbers);
             Tiles.Add(tile);
-            _repository.AddHistory("TileCreated", $"Création du lieu {tile.DisplayTitle}.");
-            _repository.AddHistory("RollingLineAdded", $"Lignes {FormatRollingLineRange(numbers)} ajoutées dans {tile.DisplayTitle}.");
+            await _repository.AddHistoryAsync("TileCreated", $"Création du lieu {tile.DisplayTitle}.");
+            await _repository.AddHistoryAsync("RollingLineAdded", $"Lignes {FormatRollingLineRange(numbers)} ajoutées dans {tile.DisplayTitle}.");
             OnStatePersisted?.Invoke();
             OnWorkspaceChanged?.Invoke();
         }
