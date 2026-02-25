@@ -1,0 +1,105 @@
+[
+  {
+    "Name": "D\u00E9faut",
+    "Tiles": [
+      {
+        "Name": "Thionville",
+        "Type": "Depot",
+        "X": 20,
+        "Y": 20,
+        "Width": 360,
+        "Height": 220,
+        "Tracks": [
+          {
+            "Name": "Locomotives",
+            "Kind": "Main",
+            "LeftLabel": null,
+            "RightLabel": null,
+            "IsLeftBlocked": false,
+            "IsRightBlocked": false
+          }
+        ]
+      },
+      {
+        "Name": "Mulhouse Nord",
+        "Type": "Depot",
+        "X": 400,
+        "Y": 20,
+        "Width": 360,
+        "Height": 220,
+        "Tracks": [
+          {
+            "Name": "Locomotives",
+            "Kind": "Main",
+            "LeftLabel": null,
+            "RightLabel": null,
+            "IsLeftBlocked": false,
+            "IsRightBlocked": false
+          }
+        ]
+      },
+      {
+        "Name": "Zeebrugge",
+        "Type": "VoieGarage",
+        "X": 20,
+        "Y": 280,
+        "Width": 360,
+        "Height": 220,
+        "Tracks": [
+          {
+            "Name": "BRAM",
+            "Kind": "Zone",
+            "LeftLabel": null,
+            "RightLabel": null,
+            "IsLeftBlocked": false,
+            "IsRightBlocked": false
+          },
+          {
+            "Name": "ZWAN",
+            "Kind": "Zone",
+            "LeftLabel": null,
+            "RightLabel": null,
+            "IsLeftBlocked": false,
+            "IsRightBlocked": false
+          }
+        ]
+      },
+      {
+        "Name": "Anvers Nord",
+        "Type": "VoieGarage",
+        "X": 400,
+        "Y": 280,
+        "Width": 360,
+        "Height": 220,
+        "Tracks": [
+          {
+            "Name": "917",
+            "Kind": "Zone",
+            "LeftLabel": "BLOCK",
+            "RightLabel": "BIF",
+            "IsLeftBlocked": false,
+            "IsRightBlocked": false
+          }
+        ]
+      },
+      {
+        "Name": "Bale",
+        "Type": "VoieGarage",
+        "X": 20,
+        "Y": 540,
+        "Width": 360,
+        "Height": 220,
+        "Tracks": [
+          {
+            "Name": "Vrac",
+            "Kind": "Main",
+            "LeftLabel": null,
+            "RightLabel": null,
+            "IsLeftBlocked": false,
+            "IsRightBlocked": false
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -2,6 +2,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using Ploco.Models;
+using Ploco.Helpers;
 
 namespace Ploco
 {
@@ -105,6 +106,7 @@ namespace Ploco
             }
             catch (Exception ex)
             {
+                Logger.Error("Erreur lors de l'enregistrement de l'archive via fichier texte", ex, "ModifierStatutDialog");
                 MessageBox.Show("Erreur lors de l'enregistrement de l'archive : " + ex.Message);
             }
 

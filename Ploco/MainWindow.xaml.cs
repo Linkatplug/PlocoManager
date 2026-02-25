@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -12,6 +12,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.Win32;
+using Microsoft.Extensions.DependencyInjection;
 using Ploco.Data;
 using Ploco.Dialogs;
 using Ploco.Helpers;
@@ -22,10 +23,9 @@ namespace Ploco
     public partial class MainWindow : Window
     {
         public static readonly RoutedUICommand LocomotiveHsCommand = new("Loc HS", "LocomotiveHsCommand", typeof(MainWindow));
-        private readonly PlocoRepository _repository;
-        private readonly ObservableCollection<LocomotiveModel> _locomotives = new();
-        private readonly ObservableCollection<TileModel> _tiles = new();
-        private readonly List<LayoutPreset> _layoutPresets = new();
+        private readonly IPlocoRepository _repository;
+        private readonly ViewModels.MainViewModel _viewModel;
+        
         private const string LayoutPresetFileName = "layout_presets.json";
         private const double MinTileWidth = 260;
         private const double MinTileHeight = 180;
@@ -33,15 +33,22 @@ namespace Ploco
         private const int RollingLineStartNumber = 1101;
         private const int DefaultRollingLineCount = 23;
         private bool _isDarkMode;
-        private Point _dragStartPoint;
         private TileModel? _draggedTile;
         private Point _tileDragStart;
         private bool _isResizingTile;
         private readonly Dictionary<Type, Window> _modelessWindows = new();
+
         public MainWindow()
         {
             InitializeComponent();
-            _repository = new PlocoRepository("ploco.db");
+            _viewModel = App.ServiceProvider.GetRequiredService<ViewModels.MainViewModel>();
+            DataContext = _viewModel;
+            
+            _repository = App.ServiceProvider.GetRequiredService<IPlocoRepository>();
+            _viewModel.InitializeEvents(PersistState, async () => await LoadStateAsync());
+            _viewModel.RequestLocomotiveListRefresh += RefreshLocomotivesDisplay;
+            _viewModel.OnWorkspaceChanged += RefreshTapisT13;
+            
             InputBindings.Add(new KeyBinding(LocomotiveHsCommand, new KeyGesture(Key.H, ModifierKeys.Control)));
             CommandBindings.Add(new CommandBinding(LocomotiveHsCommand, LocomotiveHsCommand_Executed, LocomotiveHsCommand_CanExecute));
             
@@ -50,31 +57,78 @@ namespace Ploco
             Logger.Info("Application starting", "Application");
         }
 
+        public async Task InitializeAppAsync(SplashWindow splash)
+        {
+            Logger.Info("Initializing application from Splash Screen", "Application");
+            
+            // Lancement du VRAI chargement en arrière-plan sans bloquer la façade
+            var backgroundLoadTask = Task.Run(async () =>
+            {
+                await _repository.InitializeAsync();
+                await _repository.SeedDefaultDataIfNeededAsync();
+
+                await Application.Current.Dispatcher.InvokeAsync(async () => 
+                {
+                    await LoadStateAsync();
+                });
+                
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    LoadLayoutPresets();
+                    RefreshPresetMenu();
+                    ApplyTheme(false);
+                });
+            });
+
+            // Tableau des phrases fictives (Easter Eggs)
+            var easterEggs = new[]
+            {
+                "Remplissage des sablières",
+                "Graissage des boudins",
+                "Chargement des lanternes",
+                "Réception d'un appel du SUD de MUN",
+                "VAP du cœur du programme",
+                "Formule magique anti-DDS",
+                "Enclenchement du DJ",
+                "... Appel du SUD du MUN ..."
+            };
+
+            // Boucle d'allumage fictif
+            int stepLength = 100 / easterEggs.Length;
+            for (int i = 0; i < easterEggs.Length; i++)
+            {
+                int currentPercent = (i + 1) * stepLength;
+                splash.UpdateProgress(currentPercent, easterEggs[i] + "...");
+                
+                // Attente stricte de 1 seconde (1000ms) par phrase
+                await Task.Delay(1000); 
+            }
+
+            // Attente de sécurité si le vrai chargement derrière était plus long que prévu
+            await backgroundLoadTask;
+            
+            splash.UpdateProgress(100, "100%");
+            await Task.Delay(200);
+            
+            Logger.Info($"Loaded {_viewModel.Locomotives.Count} locomotives and {_viewModel.Tiles.Count} tiles", "Application");
+        }
+
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
             Logger.Info("Main window loaded", "Application");
             
-            // Restore window settings
             WindowSettingsHelper.RestoreWindowSettings(this, "MainWindow");
             
-            _repository.Initialize();
-            _repository.SeedDefaultDataIfNeeded();
-
-            LoadState();
-            LoadLayoutPresets();
-            RefreshPresetMenu();
-            ApplyTheme(false);
-            LocomotiveList.ItemsSource = _locomotives;
-            TileCanvas.ItemsSource = _tiles;
+            LocomotiveList.ItemsSource = _viewModel.Locomotives;
+            TileCanvas.ItemsSource = _viewModel.Tiles;
             InitializeLocomotiveView();
             UpdateTileCanvasExtent();
-            
-            Logger.Info($"Loaded {_locomotives.Count} locomotives and {_tiles.Count} tiles", "Application");
         }
 
         private void TileScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
         {
-            UpdateTileCanvasExtent();
+            // Do not call UpdateTileCanvasExtent() here to prevent infinite layout cycles
+            // resulting from ScrollBar toggles adjusting Viewport Width/Height.
         }
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
@@ -96,39 +150,61 @@ namespace Ploco
             Logger.Shutdown();
         }
 
-        private void LoadState()
+        private async Task LoadStateAsync()
         {
-            _locomotives.Clear();
-            _tiles.Clear();
+            _viewModel.Locomotives.Clear();
+            _viewModel.Tiles.Clear();
 
-            var state = _repository.LoadState();
+            var state = await _repository.LoadStateAsync();
             foreach (var loco in state.Locomotives.OrderBy(l => l.SeriesName).ThenBy(l => l.Number))
             {
-                _locomotives.Add(loco);
+                if (!loco.IsForecastGhost)
+                {
+                    _viewModel.Locomotives.Add(loco);
+                }
             }
 
             foreach (var tile in state.Tiles)
             {
-                EnsureDefaultTracks(tile);
+                _viewModel.EnsureDefaultTracks(tile);
                 foreach (var track in tile.Tracks)
                 {
                     EnsureTrackOffsets(track);
                 }
-                _tiles.Add(tile);
+                _viewModel.Tiles.Add(tile);
             }
 
-            UpdatePoolVisibility();
+            // Restore Ghost links
+            var realLocos = _viewModel.Locomotives.ToList();
+            var ghosts = state.Locomotives.Where(l => l.IsForecastGhost).ToList();
+            
+            foreach (var ghost in ghosts)
+            {
+                var origin = realLocos.FirstOrDefault(l => l.Number == ghost.Number && l.IsForecastOrigin);
+                if (origin != null)
+                {
+                    ghost.ForecastSourceLocomotiveId = origin.Id;
+                    origin.ForecastTargetRollingLineTrackId = ghost.AssignedTrackId;
+                }
+            }
+
+            _viewModel.UpdatePoolVisibility();
             UpdateTileCanvasExtent();
         }
 
         private void PersistState()
         {
-            // Filter out ghost locomotives from tracks before saving
-            var locomotivesToSave = _locomotives.Where(l => !l.IsForecastGhost).ToList();
+            // Collect all locomotives including ghosts
+            var locomotivesToSave = _viewModel.Locomotives.ToList();
+            var ghosts = _viewModel.Tiles.SelectMany(t => t.Tracks)
+                                         .SelectMany(t => t.Locomotives)
+                                         .Where(l => l.IsForecastGhost)
+                                         .ToList();
+            locomotivesToSave.AddRange(ghosts);
             
             // Create a clean copy of tiles without ghosts
             var tilesToSave = new List<TileModel>();
-            foreach (var tile in _tiles)
+            foreach (var tile in _viewModel.Tiles)
             {
                 var tileCopy = new TileModel
                 {
@@ -164,8 +240,8 @@ namespace Ploco
                         TrainNumber = track.TrainNumber
                     };
 
-                    // Only add non-ghost locomotives to the track
-                    foreach (var loco in track.Locomotives.Where(l => !l.IsForecastGhost))
+                    // Add all locomotives (including ghosts) to the track
+                    foreach (var loco in track.Locomotives)
                     {
                         trackCopy.Locomotives.Add(loco);
                     }
@@ -183,12 +259,13 @@ namespace Ploco
                 Locomotives = locomotivesToSave,
                 Tiles = tilesToSave
             };
-            _repository.SaveState(state);
+            // PersistState est synchrone historiquement (événement de fermeture/autre), on le lance sans attendre si on ne peut pas l'attendre.
+            _ = _repository.SaveStateAsync(state);
         }
 
         private void InitializeLocomotiveView()
         {
-            var view = CollectionViewSource.GetDefaultView(_locomotives);
+            var view = CollectionViewSource.GetDefaultView(_viewModel.Locomotives);
             view.SortDescriptions.Clear();
             view.SortDescriptions.Add(new System.ComponentModel.SortDescription(nameof(LocomotiveModel.Number), System.ComponentModel.ListSortDirection.Ascending));
         }
@@ -196,7 +273,7 @@ namespace Ploco
         private List<RollingStockSeries> BuildSeriesState()
         {
             var series = new Dictionary<int, RollingStockSeries>();
-            foreach (var loco in _locomotives)
+            foreach (var loco in _viewModel.Locomotives)
             {
                 if (!series.ContainsKey(loco.SeriesId))
                 {
@@ -216,729 +293,54 @@ namespace Ploco
             return series.Values.ToList();
         }
 
-        private TrackModel CreateDefaultTrack(TileModel tile)
-        {
-            return tile.Type switch
-            {
-                TileType.Depot => new TrackModel { Name = "Locomotives", Kind = TrackKind.Main },
-                TileType.VoieGarage => new TrackModel { Name = "Vrac", Kind = TrackKind.Main },
-                _ => new TrackModel { Name = "Locomotives", Kind = TrackKind.Main }
-            };
-        }
-
-        private void AddPlace_Click(object sender, RoutedEventArgs e)
-        {
-            var dialog = new PlaceDialog { Owner = this };
-            if (dialog.ShowDialog() == true)
-            {
-                if (dialog.SelectedType == TileType.ArretLigne)
-                {
-                    var lineDialog = new LinePlaceDialog(dialog.SelectedName) { Owner = this };
-                    if (lineDialog.ShowDialog() == true)
-                    {
-                        AddLineTile(lineDialog);
-                    }
-                    return;
-                }
-
-                if (dialog.SelectedType == TileType.RollingLine)
-                {
-                    AddRollingLineTile(dialog.SelectedName);
-                    return;
-                }
-
-                AddTile(dialog.SelectedType, dialog.SelectedName);
-            }
-        }
-
-        private void AddTile(TileType type, string name)
-        {
-            var tile = new TileModel
-            {
-                Name = name,
-                Type = type,
-                X = 20 + _tiles.Count * 30,
-                Y = 20 + _tiles.Count * 30
-            };
-            EnsureDefaultTracks(tile);
-            ApplyGaragePresets(tile);
-            _tiles.Add(tile);
-            _repository.AddHistory("TileCreated", $"Création du lieu {tile.DisplayTitle}.");
-            PersistState();
-            UpdateTileCanvasExtent();
-        }
-
-        private void AddLineTile(LinePlaceDialog dialog)
-        {
-            var tile = new TileModel
-            {
-                Name = dialog.PlaceName,
-                Type = TileType.ArretLigne,
-                X = 20 + _tiles.Count * 30,
-                Y = 20 + _tiles.Count * 30
-            };
-
-            var track = new TrackModel
-            {
-                Name = dialog.TrackName,
-                Kind = TrackKind.Line,
-                IsOnTrain = dialog.IsOnTrain,
-                TrainNumber = dialog.IsOnTrain ? dialog.TrainNumber : null,
-                StopTime = dialog.IsOnTrain ? dialog.StopTime : null,
-                IssueReason = dialog.IssueReason,
-                IsLocomotiveHs = dialog.IsLocomotiveHs
-            };
-
-            tile.Tracks.Add(track);
-            tile.RefreshTrackCollections();
-            _tiles.Add(tile);
-            _repository.AddHistory("TileCreated", $"Création du lieu {tile.DisplayTitle}.");
-            _repository.AddHistory("LineTrackAdded", $"Ajout de la voie {track.Name} dans {tile.DisplayTitle}.");
-
-            var missingLocos = new List<string>();
-            var unavailableLocos = new List<string>();
-            var invalidLocos = new List<string>();
-            var locomotiveNumbers = ParseLocomotiveNumbers(dialog.LocomotiveNumbers, invalidLocos);
-            foreach (var number in locomotiveNumbers)
-            {
-                var loco = _locomotives.FirstOrDefault(l => l.Number == number);
-                if (loco == null)
-                {
-                    missingLocos.Add(number.ToString());
-                    continue;
-                }
-
-                if (loco.AssignedTrackId != null)
-                {
-                    unavailableLocos.Add(number.ToString());
-                    continue;
-                }
-
-                MoveLocomotiveToTrack(loco, track, track.Locomotives.Count);
-            }
-
-            var missingHsLocos = new List<string>();
-            var invalidHsLocos = new List<string>();
-            if (dialog.IsLocomotiveHs)
-            {
-                var hsNumbers = ParseLocomotiveNumbers(dialog.HsLocomotiveNumbers, invalidHsLocos);
-                foreach (var number in hsNumbers)
-                {
-                    var loco = _locomotives.FirstOrDefault(l => l.Number == number);
-                    if (loco == null)
-                    {
-                        missingHsLocos.Add(number.ToString());
-                        continue;
-                    }
-
-                    if (loco.Status != LocomotiveStatus.HS)
-                    {
-                        loco.Status = LocomotiveStatus.HS;
-                        _repository.AddHistory("StatusChanged", $"Statut modifié pour {loco.Number} (HS).");
-                    }
-                }
-            }
-
-            if (invalidLocos.Any() || invalidHsLocos.Any())
-            {
-                MessageBox.Show($"Numéros invalides ignorés : {string.Join(", ", invalidLocos.Concat(invalidHsLocos))}.",
-                    "Information", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-
-            if (missingLocos.Any() || missingHsLocos.Any())
-            {
-                var missingMessage = new List<string>();
-                if (missingLocos.Any())
-                {
-                    missingMessage.Add($"Locomotives introuvables pour l'ajout : {string.Join(", ", missingLocos)}.");
-                }
-                if (missingHsLocos.Any())
-                {
-                    missingMessage.Add($"Locomotives introuvables pour HS : {string.Join(", ", missingHsLocos)}.");
-                }
-                MessageBox.Show(string.Join(Environment.NewLine, missingMessage), "Information", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-
-            if (unavailableLocos.Any())
-            {
-                MessageBox.Show($"Locomotives déjà affectées ignorées : {string.Join(", ", unavailableLocos)}.",
-                    "Information", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-
-            UpdatePoolVisibility();
-            PersistState();
-            UpdateTileCanvasExtent();
-        }
-
-        private void AddRollingLineTile(string name)
-        {
-            var tile = new TileModel
-            {
-                Name = name,
-                Type = TileType.RollingLine,
-                X = 20 + _tiles.Count * 30,
-                Y = 20 + _tiles.Count * 30
-            };
-            var numbers = PromptRollingLineNumbers(DefaultRollingLineCount);
-            if (numbers == null)
-            {
-                return;
-            }
-
-            tile.RollingLineCount = numbers.Count;
-            NormalizeRollingLineTracks(tile, numbers);
-            _tiles.Add(tile);
-            _repository.AddHistory("TileCreated", $"Création du lieu {tile.DisplayTitle}.");
-            _repository.AddHistory("RollingLineAdded", $"Lignes {FormatRollingLineRange(numbers)} ajoutées dans {tile.DisplayTitle}.");
-            PersistState();
-            UpdateTileCanvasExtent();
-        }
-
-        private void DeleteTile_Click(object sender, RoutedEventArgs e)
-        {
-            var tile = GetTileFromSender(sender);
-            if (tile == null)
-            {
-                return;
-            }
-
-            foreach (var track in tile.Tracks.ToList())
-            {
-                foreach (var loco in track.Locomotives.ToList())
-                {
-                    track.Locomotives.Remove(loco);
-                    loco.AssignedTrackId = null;
-                }
-            }
-            _tiles.Remove(tile);
-            _repository.AddHistory("TileDeleted", $"Suppression du lieu {tile.DisplayTitle}.");
-            UpdatePoolVisibility();
-            PersistState();
-            UpdateTileCanvasExtent();
-        }
-
-        private void RenameTile_Click(object sender, RoutedEventArgs e)
-        {
-            var tile = GetTileFromSender(sender);
-            if (tile == null)
-            {
-                return;
-            }
-
-            var dialog = new SimpleTextDialog("Renommer la tuile", "Nom :", tile.Name) { Owner = this };
-            if (dialog.ShowDialog() == true)
-            {
-                tile.Name = dialog.ResponseText;
-                _repository.AddHistory("TileRenamed", $"Tuile renommée en {tile.Name}.");
-                PersistState();
-            }
-        }
-
-        private void AddDepotOutput_Click(object sender, RoutedEventArgs e)
-        {
-            var tile = GetTileFromSender(sender);
-            if (tile == null)
-            {
-                return;
-            }
-
-            if (tile.OutputTracks.Any())
-            {
-                MessageBox.Show("Une seule voie de sortie est autorisée.", "Action impossible", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-
-            var track = new TrackModel
-            {
-                Name = "Voie de sortie",
-                Kind = TrackKind.Output
-            };
-            tile.Tracks.Add(track);
-            tile.RefreshTrackCollections();
-            _repository.AddHistory("TrackAdded", $"Ajout de la voie de sortie dans {tile.DisplayTitle}.");
-            PersistState();
-        }
-
-        private void AddGarageZone_Click(object sender, RoutedEventArgs e)
-        {
-            var tile = GetTileFromSender(sender);
-            if (tile == null)
-            {
-                return;
-            }
-
-            var dialog = new SimpleTextDialog("Ajouter une zone", "Nom de zone :", "Zone 1") { Owner = this };
-            if (dialog.ShowDialog() == true)
-            {
-                var track = new TrackModel
-                {
-                    Name = dialog.ResponseText,
-                    Kind = TrackKind.Zone
-                };
-                tile.Tracks.Add(track);
-                tile.RefreshTrackCollections();
-                _repository.AddHistory("ZoneAdded", $"Ajout de la zone {track.Name} dans {tile.DisplayTitle}.");
-                PersistState();
-            }
-        }
-
-        private void RenameZone_Click(object sender, RoutedEventArgs e)
-        {
-            var track = GetTrackFromSender(sender);
-            if (track != null)
-            {
-                var dialog = new SimpleTextDialog("Renommer la zone", "Nom de zone :", track.Name) { Owner = this };
-                if (dialog.ShowDialog() == true)
-                {
-                    track.Name = dialog.ResponseText;
-                    _repository.AddHistory("ZoneRenamed", $"Zone renommée en {track.Name}.");
-                    PersistState();
-                }
-            }
-        }
-
-        private void RemoveZone_Click(object sender, RoutedEventArgs e)
-        {
-            var track = GetTrackFromSender(sender);
-            if (track != null)
-            {
-                var tile = _tiles.FirstOrDefault(t => t.Tracks.Contains(track));
-                if (tile == null)
-                {
-                    return;
-                }
-
-                foreach (var loco in track.Locomotives.ToList())
-                {
-                    track.Locomotives.Remove(loco);
-                    loco.AssignedTrackId = null;
-                }
-
-                tile.Tracks.Remove(track);
-                tile.RefreshTrackCollections();
-                _repository.AddHistory("ZoneRemoved", $"Suppression de la zone {track.Name} dans {tile.DisplayTitle}.");
-                UpdatePoolVisibility();
-                PersistState();
-            }
-        }
-
-        private void AddLineTrack_Click(object sender, RoutedEventArgs e)
-        {
-            var tile = GetTileFromSender(sender);
-            if (tile == null)
-            {
-                return;
-            }
-
-            var dialog = new LineTrackDialog { Owner = this };
-            if (dialog.ShowDialog() == true)
-            {
-                var track = dialog.BuildTrack();
-                track.Kind = TrackKind.Line;
-                tile.Tracks.Add(track);
-                tile.RefreshTrackCollections();
-                _repository.AddHistory("LineTrackAdded", $"Ajout de la voie {track.Name} dans {tile.DisplayTitle}.");
-                PersistState();
-            }
-        }
-
-        private void AddRollingLineTrack_Click(object sender, RoutedEventArgs e)
-        {
-            var tile = GetTileFromSender(sender);
-            if (tile == null || tile.Type != TileType.RollingLine)
-            {
-                return;
-            }
-
-            var currentNumbers = ResolveRollingLineNumbers(tile);
-            var defaultCount = currentNumbers.Count;
-            var numbers = PromptRollingLineNumbers(defaultCount);
-            if (numbers == null)
-            {
-                return;
-            }
-
-            var adjustedNumbers = EnsureRollingLineNumbersWithinAssignments(tile, numbers);
-            if (adjustedNumbers.Count != numbers.Count)
-            {
-                MessageBox.Show($"La configuration a été ajustée pour conserver les locomotives déjà affectées.",
-                    "Information", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-
-            tile.RollingLineCount = adjustedNumbers.Count;
-            NormalizeRollingLineTracks(tile, adjustedNumbers);
-            _repository.AddHistory("RollingLineAdded", $"Configuration des lignes ({FormatRollingLineRange(adjustedNumbers)}) dans {tile.DisplayTitle}.");
-            PersistState();
-            UpdateTileCanvasExtent();
-        }
-
-        private void RemoveLineTrack_Click(object sender, RoutedEventArgs e)
-        {
-            var track = GetTrackFromSender(sender);
-            if (track != null)
-            {
-                var tile = _tiles.FirstOrDefault(t => t.Tracks.Contains(track));
-                if (tile == null)
-                {
-                    return;
-                }
-
-                foreach (var loco in track.Locomotives.ToList())
-                {
-                    track.Locomotives.Remove(loco);
-                    loco.AssignedTrackId = null;
-                }
-
-                tile.Tracks.Remove(track);
-                tile.RefreshTrackCollections();
-                _repository.AddHistory("LineTrackRemoved", $"Suppression de la voie {track.Name} dans {tile.DisplayTitle}.");
-                UpdatePoolVisibility();
-                PersistState();
-            }
-        }
-
-        private void RenameLineTrack_Click(object sender, RoutedEventArgs e)
-        {
-            var track = GetTrackFromSender(sender);
-            if (track == null)
-            {
-                return;
-            }
-
-            var dialog = new SimpleTextDialog("Renommer la voie", "Nom de voie :", track.Name) { Owner = this };
-            if (dialog.ShowDialog() == true)
-            {
-                track.Name = dialog.ResponseText;
-                _repository.AddHistory("LineTrackRenamed", $"Voie renommée en {track.Name}.");
-                PersistState();
-            }
-        }
-
-        private void ToggleLeftBlocked_Click(object sender, RoutedEventArgs e)
+        private async void ToggleLeftBlocked_Click(object sender, RoutedEventArgs e)
         {
             if (sender is Button button && button.DataContext is TrackModel track)
             {
                 track.IsLeftBlocked = !track.IsLeftBlocked;
-                _repository.AddHistory("ZoneBlockedUpdated", $"Mise à jour du remplissage BLOCK pour {track.Name}.");
+                await _repository.AddHistoryAsync("ZoneBlockedUpdated", $"Mise à jour du remplissage BLOCK pour {track.Name}.");
                 PersistState();
             }
         }
 
-        private void ToggleRightBlocked_Click(object sender, RoutedEventArgs e)
+        private async void ToggleRightBlocked_Click(object sender, RoutedEventArgs e)
         {
             if (sender is Button button && button.DataContext is TrackModel track)
             {
                 track.IsRightBlocked = !track.IsRightBlocked;
-                _repository.AddHistory("ZoneBlockedUpdated", $"Mise à jour du remplissage BIF pour {track.Name}.");
+                await _repository.AddHistoryAsync("ZoneBlockedUpdated", $"Mise à jour du remplissage BIF pour {track.Name}.");
                 PersistState();
             }
         }
 
-        private void LocomotiveList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        private async Task RemoveLocomotiveFromTrackAsync(LocomotiveModel loco)
         {
-            _dragStartPoint = e.GetPosition(null);
-        }
-
-        private void LocomotiveList_PreviewMouseMove(object sender, MouseEventArgs e)
-        {
-            if (e.LeftButton != MouseButtonState.Pressed)
-            {
-                return;
-            }
-
-            Point currentPos = e.GetPosition(null);
-            Vector diff = _dragStartPoint - currentPos;
-            if (Math.Abs(diff.X) <= SystemParameters.MinimumHorizontalDragDistance &&
-                Math.Abs(diff.Y) <= SystemParameters.MinimumVerticalDragDistance)
-            {
-                return;
-            }
-
-            if (LocomotiveList.SelectedItem is LocomotiveModel loco)
-            {
-                // Prevent dragging ghost locomotives (safety check - they shouldn't be in the list)
-                if (loco.IsForecastGhost)
-                {
-                    return;
-                }
-                
-                DragDrop.DoDragDrop(LocomotiveList, loco, DragDropEffects.Move);
-            }
-        }
-
-        private void LocomotiveList_Drop(object sender, DragEventArgs e)
-        {
-            if (!e.Data.GetDataPresent(typeof(LocomotiveModel)))
-            {
-                return;
-            }
-
-            var loco = (LocomotiveModel)e.Data.GetData(typeof(LocomotiveModel))!;
-            var track = _tiles.SelectMany(t => t.Tracks).FirstOrDefault(t => t.Locomotives.Contains(loco));
+            var track = _viewModel.Tiles.SelectMany(t => t.Tracks).FirstOrDefault(t => t.Locomotives.Contains(loco));
             if (track != null)
             {
                 track.Locomotives.Remove(loco);
                 loco.AssignedTrackId = null;
                 loco.AssignedTrackOffsetX = null;
-                _repository.AddHistory("LocomotiveRemoved", $"Loco {loco.Number} retirée de {track.Name}.");
+                await _repository.AddHistoryAsync("LocomotiveRemoved", $"Loco {loco.Number} retirée de {track.Name}.");
             }
-
-            UpdatePoolVisibility();
-            PersistState();
-            e.Handled = true;
-        }
-
-        private void TrackLocomotives_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-        {
-            _dragStartPoint = e.GetPosition(null);
-        }
-
-        private void TrackLocomotives_PreviewMouseMove(object sender, MouseEventArgs e)
-        {
-            if (e.LeftButton != MouseButtonState.Pressed)
-            {
-                return;
-            }
-
-            Point currentPos = e.GetPosition(null);
-            Vector diff = _dragStartPoint - currentPos;
-            if (Math.Abs(diff.X) <= SystemParameters.MinimumHorizontalDragDistance &&
-                Math.Abs(diff.Y) <= SystemParameters.MinimumVerticalDragDistance)
-            {
-                return;
-            }
-
-            if (sender is ListBox listBox && listBox.SelectedItem is LocomotiveModel loco)
-            {
-                // Prevent dragging ghost locomotives
-                if (loco.IsForecastGhost)
-                {
-                    return;
-                }
-                
-                DragDrop.DoDragDrop(listBox, loco, DragDropEffects.Move);
-            }
-        }
-
-        private void TrackLocomotives_Drop(object sender, DragEventArgs e)
-        {
-            if (sender is not ListBox listBox || listBox.DataContext is not TrackModel track)
-            {
-                return;
-            }
-
-            if (e.Data.GetDataPresent(typeof(LocomotiveModel)))
-            {
-                var loco = (LocomotiveModel)e.Data.GetData(typeof(LocomotiveModel))!;
-                if (track.Kind == TrackKind.RollingLine && track.Locomotives.Any() && !track.Locomotives.Contains(loco))
-                {
-                    MessageBox.Show("Une seule locomotive est autorisée par ligne de roulement.", "Action impossible",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
-                    return;
-                }
-                var insertIndex = GetInsertIndex(listBox, e.GetPosition(listBox));
-                MoveLocomotiveToTrack(loco, track, insertIndex);
-                UpdateLocomotiveDropOffset(loco, track, listBox, e.GetPosition(listBox));
-                PersistState();
-                e.Handled = true;
-            }
-        }
-
-        private void Tile_Drop(object sender, DragEventArgs e)
-        {
-            if (sender is not Border border || border.DataContext is not TileModel tile)
-            {
-                return;
-            }
-
-            if (e.Data.GetDataPresent(typeof(LocomotiveModel)))
-            {
-                var loco = (LocomotiveModel)e.Data.GetData(typeof(LocomotiveModel))!;
-                if (tile.Type == TileType.RollingLine)
-                {
-                    return;
-                }
-                var targetTrack = GetDefaultDropTrack(tile);
-                if (targetTrack != null)
-                {
-                    MoveLocomotiveToTrack(loco, targetTrack, targetTrack.Locomotives.Count);
-                    PersistState();
-                }
-                else
-                {
-                    MessageBox.Show("Aucune voie disponible pour déposer une locomotive.", "Action impossible", MessageBoxButton.OK, MessageBoxImage.Warning);
-                }
-            }
-        }
-
-        private void MoveLocomotiveToTrack(LocomotiveModel loco, TrackModel targetTrack, int insertIndex)
-        {
-            Logger.Debug($"Moving locomotive Id={loco.Id} Number={loco.Number} to track {targetTrack.Name} at index {insertIndex}", "Movement");
-            
-            // For rolling lines, check if occupied by REAL locomotives (ignore ghosts)
-            if (targetTrack.Kind == TrackKind.RollingLine)
-            {
-                var realLocosInTarget = targetTrack.Locomotives
-                    .Where(l => !l.IsForecastGhost)
-                    .ToList();
-                
-                if (realLocosInTarget.Any() && !targetTrack.Locomotives.Contains(loco))
-                {
-                    Logger.Warning($"Cannot move loco Id={loco.Id} Number={loco.Number} to occupied rolling line {targetTrack.Name} (occupied by {realLocosInTarget.Count} real loco(s))", "Movement");
-                    MessageBox.Show("Une seule locomotive est autorisée par ligne de roulement.", "Action impossible",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
-                    return;
-                }
-            }
-
-            var currentTrack = _tiles.SelectMany(t => t.Tracks).FirstOrDefault(t => t.Locomotives.Contains(loco));
-            if (currentTrack != null)
-            {
-                var currentIndex = currentTrack.Locomotives.IndexOf(loco);
-                currentTrack.Locomotives.Remove(loco);
-                Logger.Info($"Removed loco Id={loco.Id} Number={loco.Number} from {currentTrack.Name} (index {currentIndex})", "Movement");
-                
-                if (currentTrack == targetTrack && insertIndex > currentIndex)
-                {
-                    insertIndex--;
-                }
-            }
-
-            if (!targetTrack.Locomotives.Contains(loco))
-            {
-                if (insertIndex < 0 || insertIndex > targetTrack.Locomotives.Count)
-                {
-                    targetTrack.Locomotives.Add(loco);
-                    Logger.Info($"Added loco Id={loco.Id} Number={loco.Number} to {targetTrack.Name} (end)", "Movement");
-                }
-                else
-                {
-                    targetTrack.Locomotives.Insert(insertIndex, loco);
-                    Logger.Info($"Inserted loco Id={loco.Id} Number={loco.Number} to {targetTrack.Name} at index {insertIndex}", "Movement");
-                }
-            }
-
-            loco.AssignedTrackId = targetTrack.Id;
-            loco.AssignedTrackOffsetX = null;
-            EnsureTrackOffsets(targetTrack);
-            _repository.AddHistory("LocomotiveMoved", $"Loco {loco.Number} déplacée vers {targetTrack.Name}.");
-            UpdatePoolVisibility();
-            RefreshTapisT13();
-            
-            Logger.Info($"Successfully moved loco Id={loco.Id} Number={loco.Number} to {targetTrack.Name}", "Movement");
-        }
-
-        private void SwapLocomotivesBetweenTracks(LocomotiveModel loco1, TrackModel track1, LocomotiveModel loco2, TrackModel track2)
-        {
-            // Retirer les deux locomotives de leurs tracks actuels
-            track1.Locomotives.Remove(loco1);
-            track2.Locomotives.Remove(loco2);
-            
-            // Les échanger
-            track1.Locomotives.Add(loco2);
-            track2.Locomotives.Add(loco1);
-            
-            // Mettre à jour les assignations
-            loco1.AssignedTrackId = track2.Id;
-            loco1.AssignedTrackOffsetX = null;
-            loco2.AssignedTrackId = track1.Id;
-            loco2.AssignedTrackOffsetX = null;
-            
-            EnsureTrackOffsets(track1);
-            EnsureTrackOffsets(track2);
-            UpdatePoolVisibility();
-            RefreshTapisT13();
-        }
-
-        private void UpdateLocomotiveDropOffset(LocomotiveModel loco, TrackModel track, ListBox listBox, Point dropPosition)
-        {
-            if (track.Kind != TrackKind.Line && track.Kind != TrackKind.Zone && track.Kind != TrackKind.Output)
-            {
-                loco.AssignedTrackOffsetX = null;
-                return;
-            }
-
-            const double slotWidth = 44;
-            var maxX = Math.Max(0, listBox.ActualWidth - slotWidth);
-            var clampedX = Math.Max(0, Math.Min(dropPosition.X, maxX));
-            var desiredSlot = (int)Math.Round(clampedX / slotWidth);
-            var occupiedSlots = track.Locomotives
-                .Where(item => !ReferenceEquals(item, loco))
-                .Select(item => item.AssignedTrackOffsetX.HasValue ? (int)Math.Round(item.AssignedTrackOffsetX.Value / slotWidth) : -1)
-                .Where(slot => slot >= 0)
-                .ToHashSet();
-
-            var slot = desiredSlot;
-            while (occupiedSlots.Contains(slot))
-            {
-                slot++;
-            }
-
-            loco.AssignedTrackOffsetX = slot * slotWidth;
-            EnsureTrackOffsets(track);
         }
 
         private static void EnsureTrackOffsets(TrackModel track)
         {
-            if (track.Kind != TrackKind.Line && track.Kind != TrackKind.Zone && track.Kind != TrackKind.Output)
-            {
-                foreach (var loco in track.Locomotives)
-                {
-                    loco.AssignedTrackOffsetX = null;
-                }
-                return;
-            }
-
-            const double slotWidth = 44;
-            var occupiedSlots = new HashSet<int>();
-            foreach (var loco in track.Locomotives)
-            {
-                if (loco.AssignedTrackOffsetX.HasValue)
-                {
-                    var slot = (int)Math.Round(loco.AssignedTrackOffsetX.Value / slotWidth);
-                    if (!occupiedSlots.Contains(slot))
-                    {
-                        occupiedSlots.Add(slot);
-                        loco.AssignedTrackOffsetX = slot * slotWidth;
-                        continue;
-                    }
-                }
-
-                var fallbackSlot = 0;
-                while (occupiedSlots.Contains(fallbackSlot))
-                {
-                    fallbackSlot++;
-                }
-
-                occupiedSlots.Add(fallbackSlot);
-                loco.AssignedTrackOffsetX = fallbackSlot * slotWidth;
-            }
-        }
-
-        private static int GetInsertIndex(ListBox listBox, Point dropPosition)
-        {
-            var element = listBox.InputHitTest(dropPosition) as DependencyObject;
-            while (element != null && element is not ListBoxItem)
-            {
-                element = VisualTreeHelper.GetParent(element);
-            }
-
-            if (element is ListBoxItem item)
-            {
-                return listBox.ItemContainerGenerator.IndexFromContainer(item);
-            }
-
-            return listBox.Items.Count;
+            PlacementLogicHelper.EnsureTrackOffsets(track);
         }
 
         private void MenuItem_ModifierStatut_Click(object sender, RoutedEventArgs e)
         {
             var loco = GetLocomotiveFromMenuItem(sender);
-            if (loco == null)
+            if (loco != null)
             {
-                return;
+                HandleLocomotiveStatusChange(loco);
             }
+        }
 
+        private async void HandleLocomotiveStatusChange(LocomotiveModel loco)
+        {
             var oldStatus = loco.Status;
             Logger.Debug($"Opening status dialog for loco {loco.Number} (current status: {oldStatus})", "Status");
             
@@ -946,7 +348,7 @@ namespace Ploco
             if (dialog.ShowDialog() == true)
             {
                 Logger.Info($"Status changed for loco {loco.Number}: {oldStatus} -> {loco.Status}", "Status");
-                _repository.AddHistory("StatusChanged", $"Statut modifié pour {loco.Number}.");
+                await _repository.AddHistoryAsync("StatusChanged", $"Statut modifié pour {loco.Number}.");
                 PersistState();
                 RefreshTapisT13();
             }
@@ -974,22 +376,13 @@ namespace Ploco
             }
         }
 
-        private void MenuItem_RemoveFromTile_Click(object sender, RoutedEventArgs e)
+        private async void MenuItem_RemoveFromTile_Click(object sender, RoutedEventArgs e)
         {
             var loco = GetLocomotiveFromMenuItem(sender);
-            if (loco == null)
+            if (loco != null)
             {
-                return;
-            }
-
-            var track = _tiles.SelectMany(t => t.Tracks).FirstOrDefault(t => t.Locomotives.Contains(loco));
-            if (track != null)
-            {
-                track.Locomotives.Remove(loco);
-                loco.AssignedTrackId = null;
-                loco.AssignedTrackOffsetX = null;
-                _repository.AddHistory("LocomotiveRemoved", $"Loco {loco.Number} retirée de {track.Name}.");
-                UpdatePoolVisibility();
+                await RemoveLocomotiveFromTrackAsync(loco);
+                _viewModel.UpdatePoolVisibility();
                 PersistState();
                 RefreshTapisT13();
             }
@@ -1056,332 +449,6 @@ namespace Ploco
             }
         }
 
-        /// <summary>
-        /// Removes all forecast ghosts linked to the specified locomotive from ALL tracks.
-        /// Uses robust matching to handle cases where WPF provides different instances.
-        /// Strategy: Search by Number first (most reliable), then verify it's a ghost.
-        /// </summary>
-        private int RemoveForecastGhostsFor(LocomotiveModel loco)
-        {
-            int ghostsRemoved = 0;
-            var tracksWithGhosts = new List<string>();
-
-            // Log what we're searching for
-            Logger.Debug($"RemoveForecastGhostsFor: searching for ghosts of loco Id={loco.Id} Number={loco.Number} SeriesId={loco.SeriesId} ForecastTargetRollingLineTrackId={loco.ForecastTargetRollingLineTrackId}", "Forecast");
-
-            // Try to find the real source locomotive if the passed instance doesn't have forecast info
-            int? targetTrackId = loco.ForecastTargetRollingLineTrackId;
-            
-            if (targetTrackId == null && loco.IsForecastOrigin)
-            {
-                // This is the origin but ForecastTargetRollingLineTrackId is null, shouldn't happen
-                Logger.Warning($"IsForecastOrigin=true but ForecastTargetRollingLineTrackId=null for loco Id={loco.Id} Number={loco.Number}", "Forecast");
-            }
-            
-            // If we don't have target track info, try to find it from any origin loco with same number
-            if (targetTrackId == null)
-            {
-                var originLocoWithSameNumber = _locomotives.FirstOrDefault(l => 
-                    l.IsForecastOrigin && 
-                    l.Number == loco.Number && 
-                    l.ForecastTargetRollingLineTrackId != null);
-                
-                if (originLocoWithSameNumber != null)
-                {
-                    targetTrackId = originLocoWithSameNumber.ForecastTargetRollingLineTrackId;
-                    Logger.Debug($"Found origin loco with same number: Id={originLocoWithSameNumber.Id} Number={originLocoWithSameNumber.Number}, using its ForecastTargetRollingLineTrackId={targetTrackId}", "Forecast");
-                }
-            }
-
-            // Get all tracks, prioritizing target track if known
-            var allTracks = _tiles.SelectMany(t => t.Tracks).ToList();
-            IEnumerable<TrackModel> orderedTracks;
-            
-            if (targetTrackId != null)
-            {
-                var targetTracks = allTracks.Where(t => t.Id == targetTrackId);
-                var otherTracks = allTracks.Where(t => t.Id != targetTrackId);
-                orderedTracks = targetTracks.Concat(otherTracks);
-                Logger.Debug($"Prioritizing target track Id={targetTrackId}", "Forecast");
-            }
-            else
-            {
-                orderedTracks = allTracks;
-                Logger.Debug($"No target track known, searching all tracks", "Forecast");
-            }
-
-            // Scan tracks for ghosts - use multiple matching strategies
-            foreach (var track in orderedTracks)
-            {
-                // Strategy: Find ghosts by Number (most reliable) and verify they're ghosts
-                var ghostsToRemove = track.Locomotives
-                    .Where(l => l.IsForecastGhost && l.Number == loco.Number)
-                    .ToList();
-
-                if (ghostsToRemove.Any())
-                {
-                    Logger.Debug($"Found {ghostsToRemove.Count} ghost(s) in track {track.Name} with Number={loco.Number}", "Forecast");
-                }
-
-                foreach (var ghost in ghostsToRemove)
-                {
-                    // Verify this is really a match
-                    bool isMatch = false;
-                    string matchReason = "";
-                    
-                    // Check 1: Exact Id match
-                    if (ghost.ForecastSourceLocomotiveId == loco.Id)
-                    {
-                        isMatch = true;
-                        matchReason = "SourceIdMatch";
-                    }
-                    // Check 2: Number match (already verified above, so this is our fallback)
-                    else if (ghost.Number == loco.Number)
-                    {
-                        isMatch = true;
-                        matchReason = "NumberFallback";
-                    }
-                    
-                    if (isMatch)
-                    {
-                        track.Locomotives.Remove(ghost);
-                        ghostsRemoved++;
-                        tracksWithGhosts.Add(track.Name);
-                        
-                        Logger.Debug($"Removed ghost (Id={ghost.Id}, Number={ghost.Number}, ForecastSourceLocomotiveId={ghost.ForecastSourceLocomotiveId}) for loco (Id={loco.Id}, Number={loco.Number}) from track {track.Name}, reason={matchReason}", "Forecast");
-                    }
-                }
-            }
-
-            if (ghostsRemoved > 0)
-            {
-                Logger.Info($"Removed {ghostsRemoved} ghost(s) for loco Id={loco.Id} Number={loco.Number} from tracks: {string.Join(", ", tracksWithGhosts)}", "Forecast");
-            }
-            else
-            {
-                // Log all ghosts we can see to help debug
-                var allGhosts = allTracks.SelectMany(t => t.Locomotives.Where(l => l.IsForecastGhost))
-                    .Select(g => $"Ghost Id={g.Id} Number={g.Number} SeriesId={g.SeriesId} ForecastSourceLocomotiveId={g.ForecastSourceLocomotiveId}")
-                    .ToList();
-                
-                Logger.Warning($"No ghosts found for loco Id={loco.Id} Number={loco.Number} SeriesId={loco.SeriesId}. All ghosts in system: [{string.Join("; ", allGhosts)}]", "Forecast");
-            }
-
-            return ghostsRemoved;
-        }
-
-        private void MenuItem_PlacementPrevisionnel_Click(object sender, RoutedEventArgs e)
-        {
-            var loco = GetLocomotiveFromMenuItem(sender);
-            if (loco == null)
-            {
-                return;
-            }
-
-            Logger.Debug($"Forecast placement requested: loco Id={loco.Id} Number={loco.Number}", "Forecast");
-
-            // Check if already in forecast mode
-            if (loco.IsForecastOrigin)
-            {
-                Logger.Warning($"Loco Id={loco.Id} Number={loco.Number} already in forecast mode", "Forecast");
-                MessageBox.Show("Cette locomotive est déjà en mode prévisionnel.", "Placement prévisionnel",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-
-            // Check if locomotive is assigned to a track
-            if (loco.AssignedTrackId == null)
-            {
-                Logger.Warning($"Loco Id={loco.Id} Number={loco.Number} not assigned to any track, cannot forecast", "Forecast");
-                MessageBox.Show("La locomotive doit être placée dans une tuile pour activer le mode prévisionnel.", 
-                    "Placement prévisionnel", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            // Show rolling line selection dialog
-            var dialog = new RollingLineSelectionDialog(_tiles) { Owner = this };
-            if (dialog.ShowDialog() != true || dialog.SelectedTrack == null)
-            {
-                Logger.Debug($"Forecast placement cancelled by user for loco Id={loco.Id} Number={loco.Number}", "Forecast");
-                return;
-            }
-
-            var targetTrack = dialog.SelectedTrack;
-            Logger.Info($"Forecast placement: loco Id={loco.Id} Number={loco.Number} -> track {targetTrack.Name}", "Forecast");
-
-            // Set the original locomotive to forecast origin (will turn blue via DataTrigger)
-            loco.IsForecastOrigin = true;
-            loco.ForecastTargetRollingLineTrackId = targetTrack.Id;
-
-            // Create a ghost locomotive for the rolling line
-            // Ghost shows REAL status color (red/orange/yellow/green) via StatutToBrushConverter
-            var ghost = new LocomotiveModel
-            {
-                Id = -100000 - loco.Id, // Unique negative ID
-                SeriesId = loco.SeriesId,
-                SeriesName = loco.SeriesName,
-                Number = loco.Number,
-                Status = loco.Status, // Ghost reflects real status
-                Pool = loco.Pool,
-                TractionPercent = loco.TractionPercent,
-                HsReason = loco.HsReason,
-                MaintenanceDate = loco.MaintenanceDate,
-                IsForecastGhost = true,
-                ForecastSourceLocomotiveId = loco.Id, // Link back to original using Id
-                AssignedTrackId = targetTrack.Id
-            };
-
-            Logger.Debug($"Created ghost Id={ghost.Id} Number={ghost.Number} for source loco Id={loco.Id} Number={loco.Number}, Status={loco.Status}", "Forecast");
-
-            // Add ghost ONLY to the target track, NOT to _locomotives
-            targetTrack.Locomotives.Add(ghost);
-
-            _repository.AddHistory("ForecastPlacement", 
-                $"Placement prévisionnel de la loco {loco.Number} vers {targetTrack.Name}.");
-            PersistState();
-            RefreshTapisT13();
-        }
-
-        private void MenuItem_AnnulerPrevisionnel_Click(object sender, RoutedEventArgs e)
-        {
-            var loco = GetLocomotiveFromMenuItem(sender);
-            if (loco == null || !loco.IsForecastOrigin)
-            {
-                return;
-            }
-
-            Logger.Info($"Cancelling forecast placement for loco Id={loco.Id} Number={loco.Number}", "Forecast");
-
-            // Remove all forecast ghosts for this locomotive
-            int ghostsRemoved = RemoveForecastGhostsFor(loco);
-
-            // Restore original locomotive state (DO NOT touch Status)
-            loco.IsForecastOrigin = false;
-            loco.ForecastTargetRollingLineTrackId = null;
-
-            _repository.AddHistory("ForecastCancelled", 
-                $"Annulation du placement prévisionnel de la loco {loco.Number}.");
-            PersistState();
-            RefreshTapisT13();
-            
-            if (ghostsRemoved > 0)
-            {
-                Logger.Info($"Forecast cancelled successfully for loco Id={loco.Id} Number={loco.Number}", "Forecast");
-            }
-        }
-
-        private void MenuItem_ValiderPrevisionnel_Click(object sender, RoutedEventArgs e)
-        {
-            var loco = GetLocomotiveFromMenuItem(sender);
-            if (loco == null || !loco.IsForecastOrigin)
-            {
-                return;
-            }
-
-            Logger.Info($"Validating forecast placement for loco Id={loco.Id} Number={loco.Number}", "Forecast");
-
-            // Save target track ID BEFORE resetting flags
-            var targetTrackId = loco.ForecastTargetRollingLineTrackId;
-            if (targetTrackId == null)
-            {
-                Logger.Error($"ForecastTargetRollingLineTrackId is null for loco Id={loco.Id} Number={loco.Number}", null, "Forecast");
-                MessageBox.Show("Erreur: ligne de roulement cible non définie.", "Erreur",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
-            // Find the target track
-            var targetTrack = _tiles.SelectMany(t => t.Tracks)
-                .FirstOrDefault(t => t.Id == targetTrackId);
-
-            if (targetTrack == null)
-            {
-                Logger.Error($"Target track Id={targetTrackId} not found for loco Id={loco.Id} Number={loco.Number}", null, "Forecast");
-                MessageBox.Show("La ligne de roulement cible n'a pas été trouvée.", "Erreur",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
-            // CRITICAL: Remove ghost FIRST, before checking for real locomotives
-            Logger.Debug($"Removing ghosts before validation for loco Id={loco.Id} Number={loco.Number}", "Forecast");
-            int ghostsRemoved = RemoveForecastGhostsFor(loco);
-            
-            // Now check if target line has real locomotives (after ghost removal)
-            var realLocosInTarget = targetTrack.Locomotives.Where(l => !l.IsForecastGhost).ToList();
-            if (realLocosInTarget.Any())
-            {
-                Logger.Warning($"Target track {targetTrack.Name} occupied by {realLocosInTarget.Count} real loco(s)", "Forecast");
-                var result = MessageBox.Show(
-                    $"La ligne {targetTrack.Name} est maintenant occupée par la locomotive {realLocosInTarget.First().Number}.\n" +
-                    "Voulez-vous quand même valider le placement prévisionnel ? Cela remplacera la locomotive existante.",
-                    "Ligne occupée",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Warning);
-            
-                if (result != MessageBoxResult.Yes)
-                {
-                    Logger.Info($"User declined to replace existing loco on {targetTrack.Name}", "Forecast");
-                    // Re-create ghost since validation was cancelled
-                    var ghost = new LocomotiveModel
-                    {
-                        Id = -100000 - loco.Id,
-                        SeriesId = loco.SeriesId,
-                        SeriesName = loco.SeriesName,
-                        Number = loco.Number,
-                        Status = loco.Status,
-                        Pool = loco.Pool,
-                        TractionPercent = loco.TractionPercent,
-                        HsReason = loco.HsReason,
-                        MaintenanceDate = loco.MaintenanceDate,
-                        IsForecastGhost = true,
-                        ForecastSourceLocomotiveId = loco.Id,
-                        AssignedTrackId = targetTrack.Id
-                    };
-                    targetTrack.Locomotives.Add(ghost);
-                    return;
-                }
-                
-                Logger.Warning($"User confirmed: replacing existing loco on {targetTrack.Name}", "Forecast");
-                
-                // Remove existing real locomotives (user confirmed)
-                foreach (var realLoco in realLocosInTarget.ToList())
-                {
-                    targetTrack.Locomotives.Remove(realLoco);
-                    realLoco.AssignedTrackId = null;
-                    realLoco.AssignedTrackOffsetX = null;
-                    Logger.Info($"Removed loco Id={realLoco.Id} Number={realLoco.Number} from {targetTrack.Name} (replaced by forecast)", "Forecast");
-                }
-            }
-
-            // Reset forecast flags BEFORE moving
-            loco.IsForecastOrigin = false;
-            loco.ForecastTargetRollingLineTrackId = null;
-
-            Logger.Info($"Moving loco Id={loco.Id} Number={loco.Number} to {targetTrack.Name}", "Forecast");
-            
-            // Use existing MoveLocomotiveToTrack method to properly move the locomotive
-            MoveLocomotiveToTrack(loco, targetTrack, 0);
-
-            // CRITICAL: Check if move was successful
-            if (loco.AssignedTrackId == targetTrack.Id)
-            {
-                // Move succeeded
-                _repository.AddHistory("ForecastValidated", 
-                    $"Validation du placement prévisionnel de la loco {loco.Number} vers {targetTrack.Name}.");
-                PersistState();
-                RefreshTapisT13();
-                
-                Logger.Info($"Forecast validated successfully: loco Id={loco.Id} Number={loco.Number} moved to {targetTrack.Name}", "Forecast");
-            }
-            else
-            {
-                // Move failed
-                Logger.Warning($"Forecast validation FAILED: loco Id={loco.Id} Number={loco.Number} NOT moved to {targetTrack.Name} (AssignedTrackId={loco.AssignedTrackId})", "Forecast");
-                MessageBox.Show($"Le déplacement a échoué. La locomotive n'a pas pu être placée sur {targetTrack.Name}.", 
-                    "Erreur de validation", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
         private void OpenSwapDialog(LocomotiveModel loco)
         {
             if (!string.Equals(loco.Pool, "Sibelit", StringComparison.OrdinalIgnoreCase))
@@ -1391,14 +458,13 @@ namespace Ploco
                 return;
             }
 
-            var lineasCandidates = _locomotives
-                .Where(item => string.Equals(item.Pool, "Lineas", StringComparison.OrdinalIgnoreCase)
-                               && item.AssignedTrackId == null)
+            var lineasCandidates = _viewModel.Locomotives
+                .Where(item => LocomotiveStateHelper.IsEligibleForSwap(loco, item))
                 .OrderBy(item => item.Number)
                 .ToList();
             if (!lineasCandidates.Any())
             {
-                MessageBox.Show("Aucune locomotive Lineas disponible pour le swap.", "Swap", MessageBoxButton.OK,
+                MessageBox.Show("Aucune locomotive Lineas disponible (ou éligible) pour le swap.", "Swap", MessageBoxButton.OK,
                     MessageBoxImage.Information);
                 return;
             }
@@ -1415,7 +481,7 @@ namespace Ploco
 
         private void ApplySwap(LocomotiveModel sibelitLoco, LocomotiveModel lineasLoco)
         {
-            var track = _tiles.SelectMany(t => t.Tracks).FirstOrDefault(t => t.Locomotives.Contains(sibelitLoco));
+            var track = _viewModel.Tiles.SelectMany(t => t.Tracks).FirstOrDefault(t => t.Locomotives.Contains(sibelitLoco));
             var trackIndex = track?.Locomotives.IndexOf(sibelitLoco) ?? -1;
             var trackOffset = sibelitLoco.AssignedTrackOffsetX;
 
@@ -1449,9 +515,9 @@ namespace Ploco
                 lineasLoco.AssignedTrackOffsetX = null;
             }
 
-            _repository.AddHistory("LocomotiveSwapped",
+            _ = _repository.AddHistoryAsync("LocomotiveSwapped",
                 $"Swap Sibelit {sibelitLoco.Number} ↔ Lineas {lineasLoco.Number}.");
-            UpdatePoolVisibility();
+            _viewModel.UpdatePoolVisibility();
             PersistState();
             RefreshTapisT13();
         }
@@ -1498,12 +564,12 @@ namespace Ploco
             return null;
         }
 
-        private void MarkLocomotiveHs(LocomotiveModel loco)
+        private async void MarkLocomotiveHs(LocomotiveModel loco)
         {
             var dialog = new StatusDialog(loco, LocomotiveStatus.HS) { Owner = this };
             if (dialog.ShowDialog() == true)
             {
-                _repository.AddHistory("StatusChanged", $"Statut modifié pour {loco.Number} (HS).");
+                await _repository.AddHistoryAsync("StatusChanged", $"Statut modifié pour {loco.Number} (HS).");
                 PersistState();
                 RefreshTapisT13();
             }
@@ -1591,12 +657,12 @@ namespace Ploco
             UpdateTileCanvasExtent();
         }
 
-        private void Tile_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        private async void Tile_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
             if (_draggedTile != null)
             {
                 ResolveTileOverlap(_draggedTile);
-                _repository.AddHistory("TileMoved", $"Tuile {_draggedTile.Name} déplacée.");
+                await _repository.AddHistoryAsync("TileMoved", $"Tuile {_draggedTile.Name} déplacée.");
                 PersistState();
                 UpdateTileCanvasExtent();
             }
@@ -1618,13 +684,13 @@ namespace Ploco
             }
         }
 
-        private void TileResizeThumb_DragCompleted(object sender, DragCompletedEventArgs e)
+        private async void TileResizeThumb_DragCompleted(object sender, DragCompletedEventArgs e)
         {
             _isResizingTile = false;
             if (sender is Thumb thumb && thumb.DataContext is TileModel tile)
             {
                 ResolveTileOverlap(tile);
-                _repository.AddHistory("TileResized", $"Tuile {tile.Name} redimensionnée.");
+                await _repository.AddHistoryAsync("TileResized", $"Tuile {tile.Name} redimensionnée.");
                 PersistState();
                 UpdateTileCanvasExtent();
             }
@@ -1643,72 +709,32 @@ namespace Ploco
             return null;
         }
 
-        private void UpdatePoolVisibility()
-        {
-            foreach (var loco in _locomotives)
-            {
-                loco.IsVisibleInActivePool = string.Equals(loco.Pool, "Sibelit", StringComparison.OrdinalIgnoreCase)
-                                             && loco.AssignedTrackId == null;
-            }
 
-            LocomotiveList.Items.Refresh();
-        }
 
-        private void MenuItem_Save_Click(object sender, RoutedEventArgs e)
-        {
-            PersistState();
-            var dialog = new SaveFileDialog
-            {
-                Filter = "Base de données Ploco (*.db)|*.db|Tous les fichiers (*.*)|*.*",
-                FileName = "ploco.db"
-            };
-            if (dialog.ShowDialog() == true)
-            {
-                _repository.CopyDatabaseTo(dialog.FileName);
-            }
-        }
 
-        private void MenuItem_Load_Click(object sender, RoutedEventArgs e)
-        {
-            var dialog = new OpenFileDialog
-            {
-                Filter = "Base de données Ploco (*.db)|*.db|Tous les fichiers (*.*)|*.*"
-            };
-            if (dialog.ShowDialog() == true)
-            {
-                if (!_repository.ReplaceDatabaseWith(dialog.FileName))
-                {
-                    MessageBox.Show("Le fichier sélectionné n'est pas une base SQLite valide.", "Chargement", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
-
-                _repository.Initialize();
-                LoadState();
-            }
-        }
 
         private void MenuItem_PoolManagement_Click(object sender, RoutedEventArgs e)
         {
-            var dialog = new PoolTransferWindow(_locomotives)
+            var dialog = new PoolTransferWindow(_viewModel.Locomotives)
             {
                 Owner = this
             };
             dialog.ShowDialog();
-            UpdatePoolVisibility();
+            _viewModel.UpdatePoolVisibility();
             PersistState();
             RefreshTapisT13();
         }
 
-        private void MenuItem_History_Click(object sender, RoutedEventArgs e)
+        private async void MenuItem_History_Click(object sender, RoutedEventArgs e)
         {
-            var history = _repository.LoadHistory();
+            var history = await _repository.LoadHistoryAsync();
             var dialog = new HistoriqueWindow(history) { Owner = this };
             dialog.ShowDialog();
         }
 
         private void MenuItem_TapisT13_Click(object sender, RoutedEventArgs e)
         {
-            OpenModelessWindow(() => new TapisT13Window(_locomotives, _tiles));
+            OpenModelessWindow(() => new TapisT13Window(_viewModel.Locomotives, _viewModel.Tiles));
         }
 
         private void MenuItem_PlanningPdf_Click(object sender, RoutedEventArgs e)
@@ -1718,10 +744,10 @@ namespace Ploco
 
         private void MenuItem_DatabaseManagement_Click(object sender, RoutedEventArgs e)
         {
-            OpenModelessWindow(() => new DatabaseManagementWindow(_repository, _locomotives, _tiles));
+            OpenModelessWindow(() => new DatabaseManagementWindow(_repository, _viewModel.Locomotives, _viewModel.Tiles));
         }
 
-        private void MenuItem_ResetLocomotives_Click(object sender, RoutedEventArgs e)
+        private async void MenuItem_ResetLocomotives_Click(object sender, RoutedEventArgs e)
         {
             var result = MessageBox.Show("Réinitialiser toutes les locomotives ?", "Réinitialisation des locomotives", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (result != MessageBoxResult.Yes)
@@ -1731,13 +757,18 @@ namespace Ploco
 
             Logger.Warning("User initiated locomotive reset", "Reset");
 
-            foreach (var track in _tiles.SelectMany(tile => tile.Tracks))
+            foreach (var track in _viewModel.Tiles.SelectMany(tile => tile.Tracks))
             {
                 track.Locomotives.Clear();
             }
 
-            foreach (var loco in _locomotives)
+            foreach (var loco in _viewModel.Locomotives)
             {
+                loco.IsForecastOrigin = false;
+                loco.ForecastTargetRollingLineTrackId = null;
+                loco.IsForecastGhost = false;
+                loco.ForecastSourceLocomotiveId = null;
+
                 loco.AssignedTrackId = null;
                 loco.AssignedTrackOffsetX = null;
                 loco.Status = LocomotiveStatus.Ok;
@@ -1746,15 +777,15 @@ namespace Ploco
                 loco.Pool = "Lineas";
             }
 
-            _repository.AddHistory("ResetLocomotives", "Réinitialisation des locomotives.");
-            UpdatePoolVisibility();
+            await _repository.AddHistoryAsync("ResetLocomotives", "Réinitialisation des locomotives.");
+            _viewModel.UpdatePoolVisibility();
             PersistState();
             RefreshTapisT13();
             
-            Logger.Info($"All locomotives reset successfully ({_locomotives.Count} locomotives)", "Reset");
+            Logger.Info($"All locomotives reset successfully ({_viewModel.Locomotives.Count} locomotives)", "Reset");
         }
 
-        private void MenuItem_ResetTiles_Click(object sender, RoutedEventArgs e)
+        private async void MenuItem_ResetTiles_Click(object sender, RoutedEventArgs e)
         {
             var result = MessageBox.Show("Supprimer toutes les tuiles ?", "Réinitialisation des tuiles", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (result != MessageBoxResult.Yes)
@@ -1764,7 +795,7 @@ namespace Ploco
 
             Logger.Warning("User initiated tile reset", "Reset");
             
-            foreach (var tile in _tiles.ToList())
+            foreach (var tile in _viewModel.Tiles.ToList())
             {
                 foreach (var track in tile.Tracks)
                 {
@@ -1777,9 +808,9 @@ namespace Ploco
                 }
             }
 
-            _tiles.Clear();
-            _repository.AddHistory("ResetTiles", "Suppression de toutes les tuiles.");
-            UpdatePoolVisibility();
+            _viewModel.Tiles.Clear();
+            await _repository.AddHistoryAsync("ResetTiles", "Suppression de toutes les tuiles.");
+            _viewModel.UpdatePoolVisibility();
             PersistState();
             RefreshTapisT13();
             
@@ -1792,12 +823,16 @@ namespace Ploco
             {
                 Logger.Info("Opening Import window", "Menu");
                 
-                var importWindow = new ImportWindow(_locomotives, () =>
+                var importWindow = new ImportWindow(_viewModel.Locomotives, () =>
                 {
-                    // Callback when import is complete
-                    // Refresh the UI to show updated pools
-                    PersistState();
-                    RefreshLocomotivesDisplay();
+                    Application.Current.Dispatcher.InvokeAsync(() =>
+                    {
+                        // Callback when import is complete
+                        // Refresh the UI to show updated pools
+                        _viewModel.UpdatePoolVisibility();
+                        PersistState();
+                        RefreshLocomotivesDisplay();
+                    });
                 });
                 
                 importWindow.Owner = this;
@@ -1811,23 +846,7 @@ namespace Ploco
             }
         }
 
-        private void MenuItem_Logs_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                var logsDirectory = Logger.LogsDirectory;
-                Logger.Info($"Opening logs folder: {logsDirectory}", "Menu");
-                
-                // Open the logs folder in Windows Explorer
-                System.Diagnostics.Process.Start("explorer.exe", logsDirectory);
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("Failed to open logs folder", ex, "Menu");
-                MessageBox.Show($"Impossible d'ouvrir le dossier de logs.\n\nChemin: {Logger.LogsDirectory}\n\nErreur: {ex.Message}", 
-                    "Erreur", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
+
 
         private void ToggleDarkMode_Click(object sender, RoutedEventArgs e)
         {
@@ -1900,7 +919,7 @@ namespace Ploco
             e.Handled = true;
         }
 
-        private void SaveLayoutPreset_Click(object sender, RoutedEventArgs e)
+        private async void SaveLayoutPreset_Click(object sender, RoutedEventArgs e)
         {
             var dialog = new SimpleTextDialog("Enregistrer un preset", "Nom du preset :", "Nouveau preset") { Owner = this };
             if (dialog.ShowDialog() != true)
@@ -1916,18 +935,18 @@ namespace Ploco
             }
 
             var preset = BuildLayoutPreset(name);
-            var existing = _layoutPresets.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+            var existing = _viewModel.LayoutPresets.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
             if (existing != null)
             {
-                _layoutPresets.Remove(existing);
+                _viewModel.LayoutPresets.Remove(existing);
             }
-            _layoutPresets.Add(preset);
+            _viewModel.LayoutPresets.Add(preset);
             SaveLayoutPresets();
             RefreshPresetMenu();
-            _repository.AddHistory("LayoutPresetSaved", $"Preset enregistré : {name}.");
+            await _repository.AddHistoryAsync("LayoutPresetSaved", $"Preset enregistré : {name}.");
         }
 
-        private void LoadLayoutPreset_Click(object sender, RoutedEventArgs e)
+        private async void LoadLayoutPreset_Click(object sender, RoutedEventArgs e)
         {
             if (sender is not MenuItem menuItem || menuItem.Tag is not LayoutPreset preset)
             {
@@ -1935,12 +954,12 @@ namespace Ploco
             }
 
             ApplyLayoutPreset(preset);
-            _repository.AddHistory("LayoutPresetLoaded", $"Preset chargé : {preset.Name}.");
-            UpdatePoolVisibility();
+            await _repository.AddHistoryAsync("LayoutPresetLoaded", $"Preset chargé : {preset.Name}.");
+            _viewModel.UpdatePoolVisibility();
             PersistState();
         }
 
-        private void DeleteLayoutPreset_Click(object sender, RoutedEventArgs e)
+        private async void DeleteLayoutPreset_Click(object sender, RoutedEventArgs e)
         {
             if (sender is not MenuItem menuItem || menuItem.Tag is not LayoutPreset preset)
             {
@@ -1954,281 +973,10 @@ namespace Ploco
                 return;
             }
 
-            _layoutPresets.Remove(preset);
+            _viewModel.LayoutPresets.Remove(preset);
             SaveLayoutPresets();
             RefreshPresetMenu();
-            _repository.AddHistory("LayoutPresetDeleted", $"Preset supprimé : {preset.Name}.");
-        }
-
-        private TrackModel? GetDefaultDropTrack(TileModel tile)
-        {
-            if (tile.Type == TileType.ArretLigne)
-            {
-                return tile.LineTracks.FirstOrDefault();
-            }
-
-            if (tile.Type == TileType.RollingLine)
-            {
-                return tile.RollingLineTracks.FirstOrDefault(t => !t.Locomotives.Any())
-                       ?? tile.RollingLineTracks.FirstOrDefault();
-            }
-
-            return tile.MainTrack;
-        }
-
-        private void EnsureDefaultTracks(TileModel tile)
-        {
-            if (tile.Type == TileType.RollingLine)
-            {
-                var numbers = ResolveRollingLineNumbers(tile);
-                NormalizeRollingLineTracks(tile, numbers);
-                return;
-            }
-
-            if (!tile.Tracks.Any() && tile.Type != TileType.ArretLigne)
-            {
-                tile.Tracks.Add(CreateDefaultTrack(tile));
-            }
-            tile.RefreshTrackCollections();
-        }
-
-        private static List<int> ResolveRollingLineNumbers(TileModel tile)
-        {
-            var existingNumbers = tile.Tracks
-                .Where(t => t.Kind == TrackKind.RollingLine)
-                .Select(t => int.TryParse(t.Name, out var value) ? value : 0)
-                .Where(value => value > 0)
-                .OrderBy(n => n)
-                .ToList();
-
-            if (existingNumbers.Any())
-            {
-                return existingNumbers;
-            }
-
-            // If no existing tracks, use the stored count or default
-            var count = tile.RollingLineCount ?? DefaultRollingLineCount;
-            return Enumerable.Range(RollingLineStartNumber, count).ToList();
-        }
-
-        private static void NormalizeRollingLineTracks(TileModel tile, List<int> desiredNumbers)
-        {
-            var desiredNumbersSet = desiredNumbers.Select(n => n.ToString()).ToHashSet();
-            var existing = tile.Tracks
-                .Where(t => t.Kind == TrackKind.RollingLine)
-                .ToDictionary(t => t.Name, StringComparer.OrdinalIgnoreCase);
-
-            var rollingTracks = new List<TrackModel>();
-            foreach (var number in desiredNumbers.OrderBy(n => n))
-            {
-                var key = number.ToString();
-                if (existing.TryGetValue(key, out var track))
-                {
-                    rollingTracks.Add(track);
-                }
-                else
-                {
-                    rollingTracks.Add(new TrackModel
-                    {
-                        Name = key,
-                        Kind = TrackKind.RollingLine
-                    });
-                }
-            }
-
-            var nonRollingTracks = tile.Tracks.Where(t => t.Kind != TrackKind.RollingLine).ToList();
-            tile.Tracks.Clear();
-            foreach (var track in nonRollingTracks)
-            {
-                tile.Tracks.Add(track);
-            }
-            foreach (var track in rollingTracks)
-            {
-                tile.Tracks.Add(track);
-            }
-
-            tile.RefreshTrackCollections();
-        }
-
-        private static List<int> EnsureRollingLineNumbersWithinAssignments(TileModel tile, List<int> requestedNumbers)
-        {
-            var assignedNumbers = tile.Tracks
-                .Where(t => t.Kind == TrackKind.RollingLine && t.Locomotives.Any())
-                .Select(t => int.TryParse(t.Name, out var value) ? value : 0)
-                .Where(value => value > 0)
-                .ToList();
-
-            if (!assignedNumbers.Any())
-            {
-                return requestedNumbers;
-            }
-
-            // Include all assigned numbers in the result
-            var result = new HashSet<int>(requestedNumbers);
-            foreach (var assigned in assignedNumbers)
-            {
-                result.Add(assigned);
-            }
-
-            return result.OrderBy(n => n).ToList();
-        }
-
-        private static string FormatRollingLineRange(List<int> numbers)
-        {
-            if (numbers == null || numbers.Count == 0)
-            {
-                return "";
-            }
-
-            if (numbers.Count == 1)
-            {
-                return numbers[0].ToString();
-            }
-
-            var sorted = numbers.OrderBy(n => n).ToList();
-            var ranges = new List<string>();
-            int rangeStart = sorted[0];
-            int rangeEnd = sorted[0];
-
-            for (int i = 1; i < sorted.Count; i++)
-            {
-                if (sorted[i] == rangeEnd + 1)
-                {
-                    rangeEnd = sorted[i];
-                }
-                else
-                {
-                    ranges.Add(rangeStart == rangeEnd ? rangeStart.ToString() : $"{rangeStart}-{rangeEnd}");
-                    rangeStart = sorted[i];
-                    rangeEnd = sorted[i];
-                }
-            }
-
-            ranges.Add(rangeStart == rangeEnd ? rangeStart.ToString() : $"{rangeStart}-{rangeEnd}");
-
-            return string.Join(", ", ranges);
-        }
-
-        private List<int>? PromptRollingLineNumbers(int defaultCount)
-        {
-            var dialog = new RollingLineRangeDialog(defaultCount.ToString())
-            {
-                Owner = this
-            };
-
-            if (dialog.ShowDialog() != true)
-            {
-                return null;
-            }
-
-            return dialog.SelectedNumbers;
-        }
-
-        private void RollingLineRow_DragOver(object sender, DragEventArgs e)
-        {
-            if (sender is not Border border || border.DataContext is not TrackModel track)
-            {
-                return;
-            }
-
-            if (!e.Data.GetDataPresent(typeof(LocomotiveModel)))
-            {
-                e.Effects = DragDropEffects.None;
-                return;
-            }
-
-            var loco = (LocomotiveModel)e.Data.GetData(typeof(LocomotiveModel))!;
-            
-            // Prevent dragging ghost locomotives
-            if (loco.IsForecastGhost)
-            {
-                e.Effects = DragDropEffects.None;
-                border.Background = Brushes.MistyRose;
-                e.Handled = true;
-                return;
-            }
-            
-            // Pour les lignes de roulement, on permet toujours le drop
-            // Si la ligne est occupée par une autre loco, on fera un swap
-            var canDrop = !track.Locomotives.Any() || track.Locomotives.Contains(loco) || 
-                          (track.Locomotives.Count == 1 && !track.Locomotives.Contains(loco));
-            
-            e.Effects = canDrop ? DragDropEffects.Move : DragDropEffects.None;
-            
-            // Feedback visuel: bleu si drop possible (même pour swap)
-            border.Background = canDrop ? new SolidColorBrush(Color.FromArgb(50, 0, 120, 215)) : Brushes.MistyRose;
-            e.Handled = true;
-        }
-
-        private void RollingLineRow_DragLeave(object sender, DragEventArgs e)
-        {
-            if (sender is Border border)
-            {
-                border.Background = Brushes.Transparent;
-            }
-        }
-
-        private void RollingLineRow_Drop(object sender, DragEventArgs e)
-        {
-            if (sender is not Border border || border.DataContext is not TrackModel track)
-            {
-                return;
-            }
-
-            border.Background = Brushes.Transparent;
-
-            if (!e.Data.GetDataPresent(typeof(LocomotiveModel)))
-            {
-                return;
-            }
-
-            var loco = (LocomotiveModel)e.Data.GetData(typeof(LocomotiveModel))!;
-            
-            // Prevent dropping ghost locomotives
-            if (loco.IsForecastGhost)
-            {
-                MessageBox.Show("Les locomotives fantômes (prévision) ne peuvent pas être déplacées.", "Action impossible",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-            
-            // Si la ligne cible contient déjà une locomotive différente, on fait un swap
-            if (track.Locomotives.Any() && !track.Locomotives.Contains(loco))
-            {
-                var existingLoco = track.Locomotives.First();
-                
-                // Check if existing is a ghost - don't allow swap with ghosts
-                if (existingLoco.IsForecastGhost)
-                {
-                    MessageBox.Show("Impossible d'échanger avec une locomotive fantôme (prévision).", "Action impossible",
-                        MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
-                
-                var sourceTrack = _tiles.SelectMany(t => t.Tracks).FirstOrDefault(t => t.Locomotives.Contains(loco));
-                
-                if (sourceTrack != null && sourceTrack.Kind == TrackKind.RollingLine)
-                {
-                    // Swap: échanger les locomotives entre les deux lignes
-                    SwapLocomotivesBetweenTracks(loco, sourceTrack, existingLoco, track);
-                    _repository.AddHistory("LocomotiveMoved", $"Croisement: {loco.Number} ↔ {existingLoco.Number} entre {sourceTrack.Name} et {track.Name}.");
-                    PersistState();
-                    e.Handled = true;
-                    return;
-                }
-                else
-                {
-                    // Si la source n'est pas une ligne de roulement, on bloque
-                    MessageBox.Show("Une seule locomotive est autorisée par ligne de roulement.", "Action impossible",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
-                    return;
-                }
-            }
-
-            // Cas normal: déplacement simple (ligne vide ou même loco)
-            MoveLocomotiveToTrack(loco, track, 0);
-            PersistState();
-            e.Handled = true;
+            await _repository.AddHistoryAsync("LayoutPresetDeleted", $"Preset supprimé : {preset.Name}.");
         }
 
         private void ApplyGaragePresets(TileModel tile)
@@ -2325,7 +1073,7 @@ namespace Ploco
             while (hasOverlap)
             {
                 hasOverlap = false;
-                foreach (var other in _tiles)
+                foreach (var other in _viewModel.Tiles)
                 {
                     if (ReferenceEquals(other, tile))
                     {
@@ -2349,30 +1097,6 @@ namespace Ploco
                    && first.X + first.Width > second.X
                    && first.Y < second.Y + second.Height
                    && first.Y + first.Height > second.Y;
-        }
-
-        private static List<int> ParseLocomotiveNumbers(string input, List<string> invalidTokens)
-        {
-            var numbers = new List<int>();
-            if (string.IsNullOrWhiteSpace(input))
-            {
-                return numbers;
-            }
-
-            var tokens = input.Split(new[] { ' ', ',', ';', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var token in tokens)
-            {
-                if (int.TryParse(token, out var number))
-                {
-                    numbers.Add(number);
-                }
-                else
-                {
-                    invalidTokens.Add(token);
-                }
-            }
-
-            return numbers;
         }
 
         private void ApplyTheme(bool darkMode)
@@ -2413,7 +1137,7 @@ namespace Ploco
 
         private void LoadLayoutPresets()
         {
-            _layoutPresets.Clear();
+            _viewModel.LayoutPresets.Clear();
             if (File.Exists(LayoutPresetFileName))
             {
                 try
@@ -2422,18 +1146,22 @@ namespace Ploco
                     var presets = JsonSerializer.Deserialize<List<LayoutPreset>>(json, GetPresetSerializerOptions());
                     if (presets != null)
                     {
-                        _layoutPresets.AddRange(presets);
+                        foreach (var preset in presets)
+                        {
+                            _viewModel.LayoutPresets.Add(preset);
+                        }
                     }
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    _layoutPresets.Clear();
+                    Logger.Error("Erreur lors de la lecture du fichier LayoutPreset", ex, "Layout");
+                    _viewModel.LayoutPresets.Clear();
                 }
             }
 
-            if (_layoutPresets.All(p => !string.Equals(p.Name, "Défaut", StringComparison.OrdinalIgnoreCase)))
+            if (_viewModel.LayoutPresets.All(p => !string.Equals(p.Name, "Défaut", StringComparison.OrdinalIgnoreCase)))
             {
-                _layoutPresets.Add(BuildDefaultPreset());
+                _viewModel.LayoutPresets.Add(BuildDefaultPreset());
             }
 
             SaveLayoutPresets();
@@ -2441,7 +1169,7 @@ namespace Ploco
 
         private void SaveLayoutPresets()
         {
-            var json = JsonSerializer.Serialize(_layoutPresets, GetPresetSerializerOptions());
+            var json = JsonSerializer.Serialize(_viewModel.LayoutPresets, GetPresetSerializerOptions());
             File.WriteAllText(LayoutPresetFileName, json);
         }
 
@@ -2454,7 +1182,7 @@ namespace Ploco
 
             ViewPresetsMenu.Items.Clear();
             ViewPresetsDeleteMenu.Items.Clear();
-            foreach (var preset in _layoutPresets.OrderBy(p => p.Name))
+            foreach (var preset in _viewModel.LayoutPresets.OrderBy(p => p.Name))
             {
                 var item = new MenuItem
                 {
@@ -2479,7 +1207,7 @@ namespace Ploco
 
         private LayoutPreset BuildLayoutPreset(string name)
         {
-            var tiles = _tiles
+            var tiles = _viewModel.Tiles
                 .Where(tile => tile.Type != TileType.ArretLigne)
                 .Select(tile => new LayoutTile
                 {
@@ -2539,8 +1267,8 @@ namespace Ploco
                     X = startX + (index % 2) * stepX,
                     Y = startY + (index / 2) * stepY
                 };
-                EnsureDefaultTracks(tile);
-                ApplyGaragePresets(tile);
+                _viewModel.EnsureDefaultTracks(tile);
+                _viewModel.ApplyGaragePresets(tile);
 
                 preset.Tiles.Add(new LayoutTile
                 {
@@ -2567,7 +1295,7 @@ namespace Ploco
 
         private void ApplyLayoutPreset(LayoutPreset preset)
         {
-            var removableTiles = _tiles.Where(tile => tile.Type != TileType.ArretLigne).ToList();
+            var removableTiles = _viewModel.Tiles.Where(tile => tile.Type != TileType.ArretLigne).ToList();
             foreach (var tile in removableTiles)
             {
                 foreach (var track in tile.Tracks)
@@ -2579,7 +1307,7 @@ namespace Ploco
                         loco.AssignedTrackOffsetX = null;
                     }
                 }
-                _tiles.Remove(tile);
+                _viewModel.Tiles.Remove(tile);
             }
 
             foreach (var layoutTile in preset.Tiles.Where(t => t.Type != TileType.ArretLigne))
@@ -2606,7 +1334,7 @@ namespace Ploco
                     });
                 }
                 tile.RefreshTrackCollections();
-                _tiles.Add(tile);
+                _viewModel.Tiles.Add(tile);
             }
             UpdateTileCanvasExtent();
         }
@@ -2618,32 +1346,28 @@ namespace Ploco
                 return;
             }
 
-            if (!_tiles.Any())
+            if (!_viewModel.Tiles.Any())
             {
-                TileCanvas.Width = Math.Max(0, TileScrollViewer?.ViewportWidth ?? 0);
-                TileCanvas.Height = Math.Max(0, TileScrollViewer?.ViewportHeight ?? 0);
+                TileCanvas.Width = 0;
+                TileCanvas.Height = 0;
                 return;
             }
 
-            var maxX = _tiles.Max(tile => tile.X + tile.Width);
-            var maxY = _tiles.Max(tile => tile.Y + tile.Height);
-            var viewportWidth = TileScrollViewer?.ViewportWidth ?? 0;
-            var viewportHeight = TileScrollViewer?.ViewportHeight ?? 0;
-            TileCanvas.Width = Math.Max(viewportWidth, maxX + CanvasPadding);
-            TileCanvas.Height = Math.Max(viewportHeight, maxY + CanvasPadding);
+            var maxX = _viewModel.Tiles.Max(tile => tile.X + tile.Width);
+            var maxY = _viewModel.Tiles.Max(tile => tile.Y + tile.Height);
+            
+            TileCanvas.Width = maxX + CanvasPadding;
+            TileCanvas.Height = maxY + CanvasPadding;
         }
 
         private Point GetDropPositionInWorkspace(MouseEventArgs e)
         {
-            if (TileScrollViewer == null || TileCanvas == null)
+            if (TileCanvas == null)
             {
                 return e.GetPosition(null);
             }
 
-            var viewportPosition = e.GetPosition(TileScrollViewer);
-            return new Point(
-                viewportPosition.X + TileScrollViewer.HorizontalOffset,
-                viewportPosition.Y + TileScrollViewer.VerticalOffset);
+            return e.GetPosition(TileCanvas);
         }
 
         private static JsonSerializerOptions GetPresetSerializerOptions()
@@ -2656,63 +1380,15 @@ namespace Ploco
             return options;
         }
 
-        private sealed class LayoutPreset
-        {
-            public string Name { get; set; } = string.Empty;
-            public List<LayoutTile> Tiles { get; set; } = new();
-        }
-
-        private sealed class LayoutTile
-        {
-            public string Name { get; set; } = string.Empty;
-            public TileType Type { get; set; }
-            public double X { get; set; }
-            public double Y { get; set; }
-            public double Width { get; set; }
-            public double Height { get; set; }
-            public List<LayoutTrack> Tracks { get; set; } = new();
-        }
-
-        private sealed class LayoutTrack
-        {
-            public string Name { get; set; } = string.Empty;
-            public TrackKind Kind { get; set; }
-            public string? LeftLabel { get; set; }
-            public string? RightLabel { get; set; }
-            public bool IsLeftBlocked { get; set; }
-            public bool IsRightBlocked { get; set; }
-        }
 
         private void RefreshLocomotivesDisplay()
         {
             // Force complete refresh by reassigning ItemsSource
             LocomotiveList.ItemsSource = null;
-            LocomotiveList.ItemsSource = _locomotives;
+            LocomotiveList.ItemsSource = _viewModel.Locomotives;
             
             // Re-initialize the view (sort, etc.)
             InitializeLocomotiveView();
-            
-            // Update pool visibility - this updates IsVisibleInActivePool property
-            // which controls whether locomotives appear in the left panel
-            UpdatePoolVisibility();
-            
-            // Refresh all tiles - need to remove locomotives that are no longer in Sibelit
-            foreach (var tile in _tiles)
-            {
-                foreach (var track in tile.Tracks)
-                {
-                    // Remove locomotives that are no longer in Sibelit pool
-                    var locomotivesToRemove = track.Locomotives
-                        .Where(l => !l.IsForecastGhost && l.Pool != "Sibelit")
-                        .ToList();
-                    
-                    foreach (var loco in locomotivesToRemove)
-                    {
-                        track.Locomotives.Remove(loco);
-                        Logger.Info($"Removed locomotive {loco.Number} from track {track.Name} (pool changed to {loco.Pool})", "RefreshDisplay");
-                    }
-                }
-            }
         }
     }
 }

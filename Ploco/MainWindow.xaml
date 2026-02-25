@@ -3,13 +3,17 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:Ploco.Converters"
         xmlns:helpers="clr-namespace:Ploco.Helpers"
-        Title="Ploco - Gestion de parcs locomotives" Height="800" Width="1200"
+        xmlns:b="http://schemas.microsoft.com/xaml/behaviors"
+        xmlns:behaviors="clr-namespace:Ploco.Behaviors"
+        Title="Ploc Manager - V1.0.7 Release - By LNK Services" Height="800" Width="1200"
         Icon="pack://application:,,,/img/train_logo.ico"
         Background="{DynamicResource AppBackgroundBrush}"
         Loaded="Window_Loaded" Closing="Window_Closing">
     <Window.Resources>
+        <helpers:BindingProxy x:Key="DataContextProxy" Data="{Binding}" />
         <local:StatutToBrushConverter x:Key="StatutToBrushConverter"/>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+        <local:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibilityConverter"/>
         
         <!-- Style for locomotive Border with forecast color overlay -->
         <Style x:Key="LocomotiveBorderStyle" TargetType="Border">
@@ -23,9 +27,10 @@
                 <DataTrigger Binding="{Binding IsForecastOrigin}" Value="True">
                     <Setter Property="Background" Value="Blue"/>
                 </DataTrigger>
-                <!-- Forecast ghost: Show status color with slight transparency to distinguish from real locomotives -->
+                <!-- Forecast ghost: Show status color with slight transparency to distinguish from real locomotives. Now set to LightBlue -->
                 <DataTrigger Binding="{Binding IsForecastGhost}" Value="True">
-                    <Setter Property="Opacity" Value="0.8"/>
+                    <Setter Property="Background" Value="DeepSkyBlue"/>
+                    <Setter Property="Opacity" Value="0.65"/>
                 </DataTrigger>
             </Style.Triggers>
         </Style>
@@ -51,6 +56,14 @@
             <Setter Property="Padding" Value="4"/>
             <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
             <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        <Setter Property="VerticalContentAlignment" Value="Center"/>
+                    </Style>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style x:Key="RollingLineDropListStyle" TargetType="ListBox" BasedOn="{StaticResource DropListBoxStyle}">
             <Setter Property="MinHeight" Value="28"/>
@@ -138,9 +151,9 @@
             <MenuItem Header="Swap" Click="MenuItem_SwapPool_Click"/>
             <MenuItem Header="Retirer de la tuile" Click="MenuItem_RemoveFromTile_Click"/>
             <Separator/>
-            <MenuItem Header="Placement prévisionnel" Click="MenuItem_PlacementPrevisionnel_Click" x:Name="MenuItemPlacementPrevisionnel"/>
-            <MenuItem Header="Annuler le placement prévisionnel" Click="MenuItem_AnnulerPrevisionnel_Click" x:Name="MenuItemAnnulerPrevisionnel"/>
-            <MenuItem Header="Valider le placement prévisionnel" Click="MenuItem_ValiderPrevisionnel_Click" x:Name="MenuItemValiderPrevisionnel"/>
+            <MenuItem Header="Placement prévisionnel" Command="{Binding Data.PlacementPrevisionnelCommand, Source={StaticResource DataContextProxy}}" CommandParameter="{Binding}" x:Name="MenuItemPlacementPrevisionnel"/>
+            <MenuItem Header="Annuler le placement prévisionnel" Command="{Binding Data.AnnulerPrevisionnelCommand, Source={StaticResource DataContextProxy}}" CommandParameter="{Binding}" x:Name="MenuItemAnnulerPrevisionnel"/>
+            <MenuItem Header="Valider le placement prévisionnel" Command="{Binding Data.ValiderPrevisionnelCommand, Source={StaticResource DataContextProxy}}" CommandParameter="{Binding}" x:Name="MenuItemValiderPrevisionnel"/>
         </ContextMenu>
         <ContextMenu x:Key="LocomotiveListContextMenu">
             <MenuItem Header="Modifier statut" Click="MenuItem_ModifierStatut_Click"/>
@@ -151,10 +164,12 @@
             <Border Background="{DynamicResource TileBackgroundBrush}" BorderBrush="{DynamicResource TileBorderBrush}" BorderThickness="1"
                     CornerRadius="6" Padding="8" Width="{Binding Width}" Height="{Binding Height}" MinWidth="260" MinHeight="180"
                     AllowDrop="True"
-                    Drop="Tile_Drop"
                     MouseLeftButtonDown="Tile_MouseLeftButtonDown"
                     MouseMove="Tile_MouseMove"
                     MouseLeftButtonUp="Tile_MouseLeftButtonUp">
+                <b:Interaction.Behaviors>
+                    <behaviors:LocomotiveDropBehavior Command="{Binding Data.DropLocomotiveCommand, Source={StaticResource DataContextProxy}}" />
+                </b:Interaction.Behaviors>
                 <Grid>
                     <StackPanel>
                         <Grid>
@@ -165,10 +180,11 @@
                             <TextBlock Grid.Column="0" Text="{Binding DisplayTitle}" FontWeight="Bold" FontSize="14"/>
                             <Menu Grid.Column="1" HorizontalAlignment="Right">
                                 <MenuItem Header="...">
-                                    <MenuItem Header="Renommer tuile" Click="RenameTile_Click" Tag="{Binding}"/>
-                                    <MenuItem Header="Supprimer tuile" Click="DeleteTile_Click" Tag="{Binding}"/>
+                                    <MenuItem Header="Renommer tuile" Command="{Binding DataContext.RenameTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    <MenuItem Header="Vider la tuile" Command="{Binding DataContext.EmptyTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    <MenuItem Header="Supprimer tuile" Command="{Binding DataContext.DeleteTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                     <Separator/>
-                                    <MenuItem Header="Ajouter voie de sortie" Click="AddDepotOutput_Click" Tag="{Binding}"/>
+                                    <MenuItem Header="Ajouter voie de sortie" Command="{Binding DataContext.AddDepotOutputTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                 </MenuItem>
                             </Menu>
                         </Grid>
@@ -180,10 +196,11 @@
                                              DataContext="{Binding MainTrack}"
                                              ItemsSource="{Binding Locomotives}"
                                              Style="{StaticResource DropListBoxStyle}"
-                                             AllowDrop="True"
-                                             PreviewMouseLeftButtonDown="TrackLocomotives_PreviewMouseLeftButtonDown"
-                                             PreviewMouseMove="TrackLocomotives_PreviewMouseMove"
-                                             Drop="TrackLocomotives_Drop">
+                                             AllowDrop="True">
+                                        <b:Interaction.Behaviors>
+                                            <behaviors:LocomotiveDragBehavior />
+                                            <behaviors:LocomotiveDropBehavior Command="{Binding Data.DropLocomotiveCommand, Source={StaticResource DataContextProxy}}" />
+                                        </b:Interaction.Behaviors>
                                         <ListBox.ItemsPanel>
                                             <ItemsPanelTemplate>
                                                 <WrapPanel Orientation="Horizontal"/>
@@ -247,10 +264,11 @@
                                                         <ListBox x:Name="DepotOutputList"
                                                                  ItemsSource="{Binding Locomotives}"
                                                                  Style="{StaticResource DropListBoxStyle}"
-                                                                 AllowDrop="True"
-                                                                 PreviewMouseLeftButtonDown="TrackLocomotives_PreviewMouseLeftButtonDown"
-                                                                 PreviewMouseMove="TrackLocomotives_PreviewMouseMove"
-                                                                 Drop="TrackLocomotives_Drop">
+                                                                 AllowDrop="True">
+                                                            <b:Interaction.Behaviors>
+                                                                <behaviors:LocomotiveDragBehavior />
+                                                                <behaviors:LocomotiveDropBehavior Command="{Binding Data.DropLocomotiveCommand, Source={StaticResource DataContextProxy}}" />
+                                                            </b:Interaction.Behaviors>
                                                             <ListBox.ItemsPanel>
                                                                 <ItemsPanelTemplate>
                                                                     <Canvas />
@@ -260,6 +278,8 @@
                                                                 <Style TargetType="ListBoxItem">
                                                                     <Setter Property="Canvas.Left" Value="{Binding AssignedTrackOffsetX, TargetNullValue=0}"/>
                                                                     <Setter Property="Canvas.Top" Value="0"/>
+                                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                                                    <Setter Property="VerticalContentAlignment" Value="Center"/>
                                                                 </Style>
                                                             </ListBox.ItemContainerStyle>
                                                             <ListBox.ItemTemplate>
@@ -325,10 +345,12 @@
             <Border Background="{DynamicResource TileBackgroundBrush}" BorderBrush="{DynamicResource TileBorderBrush}" BorderThickness="1"
                     CornerRadius="6" Padding="8" Width="{Binding Width}" Height="{Binding Height}" MinWidth="260" MinHeight="180"
                     AllowDrop="True"
-                    Drop="Tile_Drop"
                     MouseLeftButtonDown="Tile_MouseLeftButtonDown"
                     MouseMove="Tile_MouseMove"
                     MouseLeftButtonUp="Tile_MouseLeftButtonUp">
+                <b:Interaction.Behaviors>
+                    <behaviors:LocomotiveDropBehavior Command="{Binding Data.DropLocomotiveCommand, Source={StaticResource DataContextProxy}}" />
+                </b:Interaction.Behaviors>
                 <Grid>
                     <StackPanel>
                         <Grid>
@@ -339,10 +361,11 @@
                             <TextBlock Grid.Column="0" Text="{Binding DisplayTitle}" FontWeight="Bold" FontSize="14"/>
                             <Menu Grid.Column="1" HorizontalAlignment="Right">
                                 <MenuItem Header="...">
-                                    <MenuItem Header="Renommer tuile" Click="RenameTile_Click" Tag="{Binding}"/>
-                                    <MenuItem Header="Supprimer tuile" Click="DeleteTile_Click" Tag="{Binding}"/>
+                                    <MenuItem Header="Renommer tuile" Command="{Binding DataContext.RenameTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    <MenuItem Header="Vider la tuile" Command="{Binding DataContext.EmptyTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    <MenuItem Header="Supprimer tuile" Command="{Binding DataContext.DeleteTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                     <Separator/>
-                                    <MenuItem Header="Ajouter zone" Click="AddGarageZone_Click" Tag="{Binding}"/>
+                                    <MenuItem Header="Ajouter zone" Command="{Binding DataContext.AddZoneTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                 </MenuItem>
                             </Menu>
                         </Grid>
@@ -365,10 +388,11 @@
                                                  DataContext="{Binding MainTrack}"
                                                  ItemsSource="{Binding Locomotives}"
                                                  Style="{StaticResource DropListBoxStyle}"
-                                                 AllowDrop="True"
-                                                 PreviewMouseLeftButtonDown="TrackLocomotives_PreviewMouseLeftButtonDown"
-                                                 PreviewMouseMove="TrackLocomotives_PreviewMouseMove"
-                                                 Drop="TrackLocomotives_Drop">
+                                                 AllowDrop="True">
+                                            <b:Interaction.Behaviors>
+                                                <behaviors:LocomotiveDragBehavior />
+                                                <behaviors:LocomotiveDropBehavior Command="{Binding Data.DropLocomotiveCommand, Source={StaticResource DataContextProxy}}" />
+                                            </b:Interaction.Behaviors>
                                             <ListBox.ItemsPanel>
                                                 <ItemsPanelTemplate>
                                                     <WrapPanel Orientation="Horizontal"/>
@@ -477,8 +501,8 @@
                                                                 <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Margin="0,0,6,0"/>
                                                                 <Menu VerticalAlignment="Center">
                                                                     <MenuItem Header="...">
-                                                                        <MenuItem Header="Renommer zone" Click="RenameZone_Click" Tag="{Binding}"/>
-                                                                        <MenuItem Header="Supprimer zone" Click="RemoveZone_Click" Tag="{Binding}"/>
+                                                                        <MenuItem Header="Renommer zone" Command="{Binding DataContext.RenameTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                                                        <MenuItem Header="Supprimer zone" Command="{Binding DataContext.DeleteTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                                                     </MenuItem>
                                                                 </Menu>
                                                             </StackPanel>
@@ -513,8 +537,8 @@
                                                                     </Style>
                                                                 </Menu.Style>
                                                                 <MenuItem Header="...">
-                                                                    <MenuItem Header="Renommer zone" Click="RenameZone_Click" Tag="{Binding}"/>
-                                                                    <MenuItem Header="Supprimer zone" Click="RemoveZone_Click" Tag="{Binding}"/>
+                                                                    <MenuItem Header="Renommer zone" Command="{Binding DataContext.RenameTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                                                    <MenuItem Header="Supprimer zone" Command="{Binding DataContext.DeleteTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                                                 </MenuItem>
                                                             </Menu>
                                                         </StackPanel>
@@ -523,10 +547,11 @@
                                                         <ListBox x:Name="GarageZoneList"
                                                                  ItemsSource="{Binding Locomotives}"
                                                                  Style="{StaticResource DropListBoxStyle}"
-                                                                 AllowDrop="True"
-                                                                 PreviewMouseLeftButtonDown="TrackLocomotives_PreviewMouseLeftButtonDown"
-                                                                 PreviewMouseMove="TrackLocomotives_PreviewMouseMove"
-                                                                 Drop="TrackLocomotives_Drop">
+                                                                 AllowDrop="True">
+                                                            <b:Interaction.Behaviors>
+                                                                <behaviors:LocomotiveDragBehavior />
+                                                                <behaviors:LocomotiveDropBehavior Command="{Binding Data.DropLocomotiveCommand, Source={StaticResource DataContextProxy}}" />
+                                                            </b:Interaction.Behaviors>
                                                             <ListBox.ItemsPanel>
                                                                 <ItemsPanelTemplate>
                                                                     <Canvas />
@@ -536,6 +561,8 @@
                                                                 <Style TargetType="ListBoxItem">
                                                                     <Setter Property="Canvas.Left" Value="{Binding AssignedTrackOffsetX, TargetNullValue=0}"/>
                                                                     <Setter Property="Canvas.Top" Value="0"/>
+                                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                                                    <Setter Property="VerticalContentAlignment" Value="Center"/>
                                                                 </Style>
                                                             </ListBox.ItemContainerStyle>
                                                             <ListBox.ItemTemplate>
@@ -601,10 +628,12 @@
             <Border Background="{DynamicResource TileBackgroundBrush}" BorderBrush="{DynamicResource TileBorderBrush}" BorderThickness="1"
                     CornerRadius="6" Padding="8" Width="{Binding Width}" Height="{Binding Height}" MinWidth="260" MinHeight="180"
                     AllowDrop="True"
-                    Drop="Tile_Drop"
                     MouseLeftButtonDown="Tile_MouseLeftButtonDown"
                     MouseMove="Tile_MouseMove"
                     MouseLeftButtonUp="Tile_MouseLeftButtonUp">
+                <b:Interaction.Behaviors>
+                    <behaviors:LocomotiveDropBehavior Command="{Binding Data.DropLocomotiveCommand, Source={StaticResource DataContextProxy}}" />
+                </b:Interaction.Behaviors>
                 <Grid>
                     <StackPanel>
                         <Grid>
@@ -615,10 +644,11 @@
                             <TextBlock Grid.Column="0" Text="{Binding DisplayTitle}" FontWeight="Bold" FontSize="14"/>
                             <Menu Grid.Column="1" HorizontalAlignment="Right">
                                 <MenuItem Header="...">
-                                    <MenuItem Header="Renommer tuile" Click="RenameTile_Click" Tag="{Binding}"/>
-                                    <MenuItem Header="Supprimer tuile" Click="DeleteTile_Click" Tag="{Binding}"/>
+                                    <MenuItem Header="Renommer tuile" Command="{Binding DataContext.RenameTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    <MenuItem Header="Vider la tuile" Command="{Binding DataContext.EmptyTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    <MenuItem Header="Supprimer tuile" Command="{Binding DataContext.DeleteTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                     <Separator/>
-                                    <MenuItem Header="Ajouter voie" Click="AddLineTrack_Click" Tag="{Binding}"/>
+                                    <MenuItem Header="Ajouter voie" Command="{Binding DataContext.AddLineTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                 </MenuItem>
                             </Menu>
                         </Grid>
@@ -636,8 +666,8 @@
                                                     <TextBlock Grid.Column="0" Text="{Binding Name}" FontWeight="SemiBold"/>
                                                     <Menu Grid.Column="1" HorizontalAlignment="Right">
                                                         <MenuItem Header="...">
-                                                            <MenuItem Header="Renommer voie" Click="RenameLineTrack_Click" Tag="{Binding}"/>
-                                                            <MenuItem Header="Supprimer voie" Click="RemoveLineTrack_Click" Tag="{Binding}"/>
+                                                            <MenuItem Header="Renommer voie" Command="{Binding DataContext.RenameTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                                            <MenuItem Header="Supprimer voie" Command="{Binding DataContext.DeleteTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                                         </MenuItem>
                                                     </Menu>
                                                 </Grid>
@@ -646,10 +676,11 @@
                                                     <ListBox x:Name="LineTrackList"
                                                              ItemsSource="{Binding Locomotives}"
                                                              Style="{StaticResource DropListBoxStyle}"
-                                                             AllowDrop="True"
-                                                             PreviewMouseLeftButtonDown="TrackLocomotives_PreviewMouseLeftButtonDown"
-                                                             PreviewMouseMove="TrackLocomotives_PreviewMouseMove"
-                                                             Drop="TrackLocomotives_Drop">
+                                                             AllowDrop="True">
+                                                        <b:Interaction.Behaviors>
+                                                            <behaviors:LocomotiveDragBehavior />
+                                                            <behaviors:LocomotiveDropBehavior Command="{Binding Data.DropLocomotiveCommand, Source={StaticResource DataContextProxy}}" />
+                                                        </b:Interaction.Behaviors>
                                                         <ListBox.ItemsPanel>
                                                             <ItemsPanelTemplate>
                                                                 <Canvas />
@@ -659,6 +690,8 @@
                                                             <Style TargetType="ListBoxItem">
                                                                 <Setter Property="Canvas.Left" Value="{Binding AssignedTrackOffsetX, TargetNullValue=0}"/>
                                                                 <Setter Property="Canvas.Top" Value="0"/>
+                                                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                                                <Setter Property="VerticalContentAlignment" Value="Center"/>
                                                             </Style>
                                                         </ListBox.ItemContainerStyle>
                                                         <ListBox.ItemTemplate>
@@ -723,10 +756,12 @@
             <Border Background="{DynamicResource TileBackgroundBrush}" BorderBrush="{DynamicResource TileBorderBrush}" BorderThickness="1"
                     CornerRadius="6" Padding="8" Width="{Binding Width}" Height="{Binding Height}" MinWidth="260" MinHeight="200"
                     AllowDrop="True"
-                    Drop="Tile_Drop"
                     MouseLeftButtonDown="Tile_MouseLeftButtonDown"
                     MouseMove="Tile_MouseMove"
                     MouseLeftButtonUp="Tile_MouseLeftButtonUp">
+                <b:Interaction.Behaviors>
+                    <behaviors:LocomotiveDropBehavior Command="{Binding Data.DropLocomotiveCommand, Source={StaticResource DataContextProxy}}" />
+                </b:Interaction.Behaviors>
                 <Grid>
                     <StackPanel>
                         <Grid>
@@ -737,10 +772,11 @@
                             <TextBlock Grid.Column="0" Text="{Binding DisplayTitle}" FontWeight="Bold" FontSize="14"/>
                             <Menu Grid.Column="1" HorizontalAlignment="Right">
                                 <MenuItem Header="...">
-                                    <MenuItem Header="Renommer tuile" Click="RenameTile_Click" Tag="{Binding}"/>
-                                    <MenuItem Header="Supprimer tuile" Click="DeleteTile_Click" Tag="{Binding}"/>
+                                    <MenuItem Header="Renommer tuile" Command="{Binding DataContext.RenameTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    <MenuItem Header="Vider la tuile" Command="{Binding DataContext.EmptyTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    <MenuItem Header="Supprimer tuile" Command="{Binding DataContext.DeleteTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                     <Separator/>
-                                    <MenuItem Header="Configurer lignes" Click="AddRollingLineTrack_Click" Tag="{Binding}"/>
+                                    <MenuItem Header="Configurer lignes" Command="{Binding DataContext.ConfigureRollingLineTracksCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                 </MenuItem>
                             </Menu>
                         </Grid>
@@ -750,10 +786,10 @@
                                     <DataTemplate>
                                         <Border BorderBrush="{DynamicResource TrackBorderBrush}" BorderThickness="1" CornerRadius="4" Padding="3" Margin="0,2,0,2"
                                                 AllowDrop="True"
-                                                Background="Transparent"
-                                                DragOver="RollingLineRow_DragOver"
-                                                DragLeave="RollingLineRow_DragLeave"
-                                                Drop="RollingLineRow_Drop">
+                                                Background="Transparent">
+                                            <b:Interaction.Behaviors>
+                                                <behaviors:LocomotiveDropBehavior Command="{Binding Data.DropLocomotiveCommand, Source={StaticResource DataContextProxy}}" IsRollingLineRow="True" />
+                                            </b:Interaction.Behaviors>
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="40"/>
@@ -765,9 +801,10 @@
                                                              ItemsSource="{Binding Locomotives}"
                                                              Style="{StaticResource RollingLineDropListStyle}"
                                                              AllowDrop="False"
-                                                             HorizontalAlignment="Left"
-                                                             PreviewMouseLeftButtonDown="TrackLocomotives_PreviewMouseLeftButtonDown"
-                                                             PreviewMouseMove="TrackLocomotives_PreviewMouseMove">
+                                                             HorizontalAlignment="Left">
+                                                        <b:Interaction.Behaviors>
+                                                            <behaviors:LocomotiveDragBehavior />
+                                                        </b:Interaction.Behaviors>
                                                         <ListBox.ItemsPanel>
                                                             <ItemsPanelTemplate>
                                                                 <WrapPanel Orientation="Horizontal"/>
@@ -825,7 +862,7 @@
                             </ItemsControl>
                         </ScrollViewer>
                         <Button Content="Configurer lignes" Margin="0,6,0,0" HorizontalAlignment="Right"
-                                Click="AddRollingLineTrack_Click" Tag="{Binding}"/>
+                                Command="{Binding DataContext.ConfigureRollingLineTracksCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                     </StackPanel>
                     <Thumb Width="14" Height="14" HorizontalAlignment="Right" VerticalAlignment="Bottom"
                            Cursor="SizeNWSE" DragDelta="TileResizeThumb_DragDelta" DragCompleted="TileResizeThumb_DragCompleted"
@@ -838,12 +875,13 @@
                                     GarageTemplate="{StaticResource GarageTileTemplate}"
                                     LineTemplate="{StaticResource LineTileTemplate}"
                                     RollingLineTemplate="{StaticResource RollingLineTileTemplate}"/>
+
     </Window.Resources>
     <DockPanel>
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="Fichier">
-                <MenuItem Header="Sauvegarder" Click="MenuItem_Save_Click"/>
-                <MenuItem Header="Charger" Click="MenuItem_Load_Click"/>
+                <MenuItem Header="Sauvegarder" Command="{Binding SaveDatabaseCommand}"/>
+                <MenuItem Header="Charger" Command="{Binding LoadDatabaseCommand}"/>
             </MenuItem>
             <MenuItem Header="Gestion">
                 <MenuItem Header="Gestion des parcs" Click="MenuItem_PoolManagement_Click"/>
@@ -870,29 +908,45 @@
                     <MenuItem Header="Réinitialiser tuiles" Click="MenuItem_ResetTiles_Click"/>
                 </MenuItem>
                 <Separator/>
-                <MenuItem Header="Logs" Click="MenuItem_Logs_Click"/>
+                <MenuItem Header="Logs" Command="{Binding OpenLogsFolderCommand}"/>
             </MenuItem>
         </Menu>
         <ToolBar DockPanel.Dock="Top">
-            <Button Content="Ajouter un lieu" Click="AddPlace_Click"/>
+            <Button Content="Ajouter un lieu" Command="{Binding AddTileCommand}"/>
         </ToolBar>
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="260"/>
+                <ColumnDefinition>
+                    <ColumnDefinition.Style>
+                        <Style TargetType="ColumnDefinition">
+                            <Setter Property="Width" Value="260" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsPoolExpanded}" Value="False">
+                                    <Setter Property="Width" Value="45" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ColumnDefinition.Style>
+                </ColumnDefinition>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <Border Grid.Column="0" Margin="10" Background="{DynamicResource PanelBackgroundBrush}" CornerRadius="6">
-                <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="Locomotives" FontWeight="Bold" Margin="8"/>
+                <!-- Vue détaillée développée -->
+                <DockPanel Visibility="{Binding IsPoolExpanded, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Grid DockPanel.Dock="Top" Margin="8">
+                        <TextBlock Text="Locomotives" FontWeight="Bold" VerticalAlignment="Center"/>
+                        <Button Content="&lt;" HorizontalAlignment="Right" VerticalAlignment="Center" Width="24" Height="24" ToolTip="Rétracter le panneau" Command="{Binding TogglePoolCommand}" Background="Transparent" BorderThickness="0"/>
+                    </Grid>
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <ListBox x:Name="LocomotiveList"
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                  ScrollViewer.CanContentScroll="False"
-                                 AllowDrop="True"
-                                 Drop="LocomotiveList_Drop"
-                                 PreviewMouseLeftButtonDown="LocomotiveList_PreviewMouseLeftButtonDown"
-                                 PreviewMouseMove="LocomotiveList_PreviewMouseMove">
+                                 AllowDrop="True">
+                        <b:Interaction.Behaviors>
+                            <behaviors:LocomotiveDragBehavior />
+                            <behaviors:LocomotiveDropBehavior Command="{Binding Data.DropLocomotiveCommand, Source={StaticResource DataContextProxy}}" />
+                        </b:Interaction.Behaviors>
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <WrapPanel />
@@ -902,6 +956,8 @@
                             <Style TargetType="ListBoxItem">
                                 <Setter Property="Visibility"
                                         Value="{Binding IsVisibleInActivePool, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
                         </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
@@ -938,13 +994,30 @@
                     </ScrollViewer>
                 </DockPanel>
             </Border>
+            
+            <!-- Vue repliée (mini-tiroir) -->
+            <Border Grid.Column="0" Margin="10" Background="{DynamicResource PanelBackgroundBrush}" CornerRadius="6"
+                    Visibility="{Binding IsPoolExpanded, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                <DockPanel>
+                    <Button DockPanel.Dock="Top" Content="&gt;" Margin="0,8,0,8" Width="24" Height="24" HorizontalAlignment="Center" ToolTip="Déployer le panneau" Command="{Binding TogglePoolCommand}" Background="Transparent" BorderThickness="0"/>
+                    
+                    <Border DockPanel.Dock="Top" Background="#FF1976D2" CornerRadius="12" Margin="4,10,4,0" Padding="0,4" HorizontalAlignment="Stretch">
+                        <TextBlock Text="{Binding VisibleLocomotivesCount}" Foreground="White" FontWeight="Bold" FontSize="12" HorizontalAlignment="Center"/>
+                    </Border>
+                    
+                    <TextBlock DockPanel.Dock="Top" Text="Loc" FontWeight="SemiBold" FontSize="11" Foreground="SlateGray" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                </DockPanel>
+            </Border>
+
             <Border Grid.Column="1" Margin="10" Background="{DynamicResource CanvasBackgroundBrush}" CornerRadius="6">
                 <ScrollViewer x:Name="TileScrollViewer"
                               HorizontalScrollBarVisibility="Auto"
                               VerticalScrollBarVisibility="Auto"
                               PanningMode="Both"
                               SizeChanged="TileScrollViewer_SizeChanged">
-                    <ItemsControl x:Name="TileCanvas">
+                    <ItemsControl x:Name="TileCanvas"
+                                  HorizontalAlignment="Left"
+                                  VerticalAlignment="Top">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <Canvas />

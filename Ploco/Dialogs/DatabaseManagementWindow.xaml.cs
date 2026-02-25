@@ -12,14 +12,14 @@ namespace Ploco.Dialogs
 {
     public partial class DatabaseManagementWindow : Window, IRefreshableWindow
     {
-        private readonly PlocoRepository _repository;
+        private readonly IPlocoRepository _repository;
         private readonly IEnumerable<LocomotiveModel> _locomotives;
         private readonly IEnumerable<TileModel> _tiles;
         private readonly ObservableCollection<TableSummary> _summaries = new();
         private readonly ObservableCollection<HistoryEntry> _history = new();
         private readonly ObservableCollection<LocomotiveStateRow> _locomotiveStates = new();
 
-        public DatabaseManagementWindow(PlocoRepository repository, IEnumerable<LocomotiveModel> locomotives, IEnumerable<TileModel> tiles)
+        public DatabaseManagementWindow(IPlocoRepository repository, IEnumerable<LocomotiveModel> locomotives, IEnumerable<TileModel> tiles)
         {
             InitializeComponent();
             _repository = repository;
@@ -31,18 +31,18 @@ namespace Ploco.Dialogs
             RefreshData();
         }
 
-        public void RefreshData()
+        public async void RefreshData()
         {
-            LoadSummary();
-            LoadHistory();
+            await LoadSummaryAsync();
+            await LoadHistoryAsync();
             LoadLocomotiveStates();
         }
 
-        private void LoadSummary()
+        private async Task LoadSummaryAsync()
         {
             _summaries.Clear();
-            var counts = _repository.GetTableCounts();
-            var trackCounts = _repository.GetTrackKindCounts();
+            var counts = await _repository.GetTableCountsAsync();
+            var trackCounts = await _repository.GetTrackKindCountsAsync();
 
             AddSummary("Séries", counts.GetValueOrDefault("series"));
             AddSummary("Locomotives", counts.GetValueOrDefault("locomotives"));
@@ -70,10 +70,11 @@ namespace Ploco.Dialogs
             });
         }
 
-        private void LoadHistory()
+        private async Task LoadHistoryAsync()
         {
             _history.Clear();
-            foreach (var entry in _repository.LoadHistory())
+            var historyData = await _repository.LoadHistoryAsync();
+            foreach (var entry in historyData)
             {
                 _history.Add(entry);
             }
@@ -95,7 +96,7 @@ namespace Ploco.Dialogs
             }
         }
 
-        private void ClearHistory_Click(object sender, RoutedEventArgs e)
+        private async void ClearHistory_Click(object sender, RoutedEventArgs e)
         {
             var result = MessageBox.Show("Voulez-vous vraiment vider l'historique ?",
                 "Confirmation", MessageBoxButton.YesNo, MessageBoxImage.Warning);
@@ -106,7 +107,7 @@ namespace Ploco.Dialogs
 
             try
             {
-                _repository.ClearHistory();
+                await _repository.ClearHistoryAsync();
                 MessageBox.Show("Nettoyage terminé : historique vidé.", "Information",
                     MessageBoxButton.OK, MessageBoxImage.Information);
             }
@@ -166,7 +167,7 @@ namespace Ploco.Dialogs
             return new[] { path };
         }
 
-        private void ResetOperationalState_Click(object sender, RoutedEventArgs e)
+        private async void ResetOperationalState_Click(object sender, RoutedEventArgs e)
         {
             var result = MessageBox.Show("Voulez-vous vraiment réinitialiser les données d'état (traction, raisons HS, incidents en ligne) ?",
                 "Confirmation", MessageBoxButton.YesNo, MessageBoxImage.Warning);
@@ -177,7 +178,7 @@ namespace Ploco.Dialogs
 
             try
             {
-                _repository.ResetOperationalState();
+                await _repository.ResetOperationalStateAsync();
                 foreach (var loco in _locomotives)
                 {
                     loco.TractionPercent = null;

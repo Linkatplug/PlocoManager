@@ -27,7 +27,7 @@ namespace Ploco.Dialogs
 {
     public partial class PlanningPdfWindow : Window
     {
-        private readonly PlocoRepository _repository;
+        private readonly IPlocoRepository _repository;
         private readonly ObservableCollection<PdfPageViewModel> _pages = new();
         private PdfDocumentModel? _document;
         private readonly Dictionary<int, PdfTemplateCalibrationModel> _calibrations = new();
@@ -42,7 +42,7 @@ namespace Ploco.Dialogs
         private CalibrationStep _calibrationStep = CalibrationStep.None;
         private bool _showCalibrationLines = true;
 
-        public PlanningPdfWindow(PlocoRepository repository)
+        public PlanningPdfWindow(IPlocoRepository repository)
         {
             InitializeComponent();
             _repository = repository;
@@ -52,7 +52,7 @@ namespace Ploco.Dialogs
             UpdateZoomLabel();
         }
 
-        private void LoadPdf_Click(object sender, RoutedEventArgs e)
+        private async void LoadPdf_Click(object sender, RoutedEventArgs e)
         {
             var dialog = new OpenFileDialog
             {
@@ -65,10 +65,10 @@ namespace Ploco.Dialogs
                 return;
             }
 
-            LoadPdf(dialog.FileName);
+            await LoadPdfAsync(dialog.FileName);
         }
 
-        private void LoadPdf(string filePath)
+        private async Task LoadPdfAsync(string filePath)
         {
             if (!File.Exists(filePath))
             {
@@ -84,7 +84,7 @@ namespace Ploco.Dialogs
             var date = DocumentDatePicker.SelectedDate ?? DateTime.Today;
             var templateHash = ComputeFileHash(filePath);
             var pageCount = GetPdfPageCount(filePath);
-            _document = _repository.GetPdfDocument(filePath, date) ?? new PdfDocumentModel
+            _document = await _repository.GetPdfDocumentAsync(filePath, date) ?? new PdfDocumentModel
             {
                 FilePath = filePath,
                 DocumentDate = date,
@@ -94,9 +94,9 @@ namespace Ploco.Dialogs
 
             _document.TemplateHash = templateHash;
             _document.PageCount = pageCount;
-            _document = _repository.SavePdfDocument(_document);
+            _document = await _repository.SavePdfDocumentAsync(_document);
 
-            var calibrations = _repository.LoadTemplateCalibrations(templateHash);
+            var calibrations = await _repository.LoadTemplateCalibrationsAsync(templateHash);
             foreach (var calibration in calibrations)
             {
                 _calibrations[calibration.PageIndex] = calibration;
@@ -108,12 +108,12 @@ namespace Ploco.Dialogs
                 if (!_calibrations.ContainsKey(calibration.PageIndex))
                 {
                     _calibrations[calibration.PageIndex] = calibration;
-                    _repository.SaveTemplateCalibration(calibration);
+                    await _repository.SaveTemplateCalibrationAsync(calibration);
                 }
             }
 
             RenderPages(filePath);
-            LoadPlacements();
+            await LoadPlacementsAsync();
             RefreshCalibrationLines();
             SetActiveCalibration(0);
             UpdateCalibrationUI();
@@ -133,14 +133,14 @@ namespace Ploco.Dialogs
             }
         }
 
-        private void LoadPlacements()
+        private async Task LoadPlacementsAsync()
         {
             if (_document == null)
             {
                 return;
             }
 
-            var placements = _repository.LoadPlacements(_document.Id);
+            var placements = await _repository.LoadPlacementsAsync(_document.Id);
             foreach (var page in _pages)
             {
                 page.Placements.Clear();
@@ -188,7 +188,7 @@ namespace Ploco.Dialogs
             e.Handled = true;
         }
 
-        private void Overlay_Drop(object sender, DragEventArgs e)
+        private async void Overlay_Drop(object sender, DragEventArgs e)
         {
             if (sender is not Canvas canvas || canvas.DataContext is not PdfPageViewModel page)
             {
@@ -212,7 +212,7 @@ namespace Ploco.Dialogs
             var dropPoint = GetCanvasPoint(e.GetPosition(canvas));
             if (_isDraggingToken && _draggedPlacement != null)
             {
-                UpdatePlacementFromDrop(page, calibration, _draggedPlacement, dropPoint);
+                await UpdatePlacementFromDropAsync(page, calibration, _draggedPlacement, dropPoint);
                 _isDraggingToken = false;
                 _draggedPlacement = null;
                 return;
@@ -225,11 +225,11 @@ namespace Ploco.Dialogs
 
             var loco = (LocomotiveModel)e.Data.GetData(typeof(LocomotiveModel))!;
             var placement = BuildPlacementFromLocomotive(loco, _document.Id, page.PageIndex);
-            UpdatePlacementFromDrop(page, calibration, placement, dropPoint);
-            SavePlacement(page, placement);
+            await UpdatePlacementFromDropAsync(page, calibration, placement, dropPoint);
+            await SavePlacementAsync(page, placement);
         }
 
-        private void UpdatePlacementFromDrop(PdfPageViewModel page, PdfTemplateCalibrationModel calibration, PdfPlacementViewModel placement, Point dropPoint)
+        private async Task UpdatePlacementFromDropAsync(PdfPageViewModel page, PdfTemplateCalibrationModel calibration, PdfPlacementViewModel placement, Point dropPoint)
         {
             var minute = MapXToMinute(calibration, page, dropPoint.X);
             var row = FindNearestRow(calibration, page, dropPoint.Y);
@@ -255,11 +255,11 @@ namespace Ploco.Dialogs
             }
             else
             {
-                SavePlacement(page, placement);
+                await SavePlacementAsync(page, placement);
             }
         }
 
-        private void SavePlacement(PdfPageViewModel page, PdfPlacementViewModel placement)
+        private async Task SavePlacementAsync(PdfPageViewModel page, PdfPlacementViewModel placement)
         {
             if (_document == null)
             {
@@ -274,13 +274,13 @@ namespace Ploco.Dialogs
                 existingPage?.Placements.Remove(existing);
                 if (existing.Id > 0)
                 {
-                    _repository.DeletePlacement(existing.Id);
+                    await _repository.DeletePlacementAsync(existing.Id);
                 }
             }
 
             placement.PdfDocumentId = _document.Id;
             var model = placement.ToModel();
-            _repository.SavePlacement(model);
+            await _repository.SavePlacementAsync(model);
             placement.Id = model.Id;
             placement.UpdatedAt = model.UpdatedAt;
             placement.CreatedAt = model.CreatedAt;
@@ -371,7 +371,6 @@ namespace Ploco.Dialogs
                         YCenter = pdfY
                     });
 
-                    // Créer et ajouter le ViewModel
                     var viewModel = new CalibrationLineViewModel
                     {
                         Type = CalibrationLineType.Horizontal,
@@ -381,7 +380,9 @@ namespace Ploco.Dialogs
                     viewModel.UpdatePosition(page, _zoom);
                     page.CalibrationLines.Add(viewModel);
 
-                    _repository.SaveTemplateCalibration(calibration);
+                    // We call it but do not await if we stay in Event Handler, however since this is Mouse event 
+                    // we must change this. Wait I can just fire-and-forget _repository.SaveTemplateCalibrationAsync here.
+                    _ = _repository.SaveTemplateCalibrationAsync(calibration);
                     _calibrationEditor.UpdateFromCalibration(calibration);
                 }
                 // Mode reste actif - l'utilisateur peut placer plusieurs lignes
@@ -442,7 +443,6 @@ namespace Ploco.Dialogs
                         calibration.XEnd = verticalLines.Last().Position;
                     }
 
-                    // Créer et ajouter le ViewModel
                     var viewModel = new CalibrationLineViewModel
                     {
                         Type = CalibrationLineType.Vertical,
@@ -453,7 +453,7 @@ namespace Ploco.Dialogs
                     viewModel.UpdatePosition(page, _zoom);
                     page.CalibrationLines.Add(viewModel);
 
-                    _repository.SaveTemplateCalibration(calibration);
+                    _ = _repository.SaveTemplateCalibrationAsync(calibration);
                     _calibrationEditor.UpdateFromCalibration(calibration);
                 }
                 // Mode reste actif - l'utilisateur peut placer plusieurs lignes
@@ -492,7 +492,7 @@ namespace Ploco.Dialogs
 
             if (_calibrationStep != CalibrationStep.None || _calibrationLineMode != CalibrationLineMode.None)
             {
-                _repository.SaveTemplateCalibration(calibration);
+                _ = _repository.SaveTemplateCalibrationAsync(calibration);
             }
         }
 
@@ -541,7 +541,7 @@ namespace Ploco.Dialogs
                                         }
                                     }
 
-                                    _repository.SaveTemplateCalibration(calibration);
+                                    _ = _repository.SaveTemplateCalibrationAsync(calibration);
                                     _calibrationEditor.UpdateFromCalibration(calibration);
                                 }
                                 break;
@@ -563,19 +563,19 @@ namespace Ploco.Dialogs
             _draggedPlacement = null;
         }
 
-        private void EditPlacement_Click(object sender, RoutedEventArgs e)
+        private async void EditPlacement_Click(object sender, RoutedEventArgs e)
         {
             if (sender is MenuItem menuItem && menuItem.DataContext is PdfPlacementViewModel placement)
             {
                 var dialog = new PdfPlacementDialog(placement) { Owner = this };
                 if (dialog.ShowDialog() == true)
                 {
-                    SavePlacement(_pages.First(p => p.PageIndex == placement.PageIndex), placement);
+                    await SavePlacementAsync(_pages.First(p => p.PageIndex == placement.PageIndex), placement);
                 }
             }
         }
 
-        private void DeletePlacement_Click(object sender, RoutedEventArgs e)
+        private async void DeletePlacement_Click(object sender, RoutedEventArgs e)
         {
             if (sender is MenuItem menuItem && menuItem.DataContext is PdfPlacementViewModel placement)
             {
@@ -583,7 +583,7 @@ namespace Ploco.Dialogs
                 page.Placements.Remove(placement);
                 if (placement.Id > 0)
                 {
-                    _repository.DeletePlacement(placement.Id);
+                    await _repository.DeletePlacementAsync(placement.Id);
                 }
             }
         }
@@ -782,7 +782,7 @@ namespace Ploco.Dialogs
             }
         }
 
-        private void LoadCalibration_Click(object sender, RoutedEventArgs e)
+        private async void LoadCalibration_Click(object sender, RoutedEventArgs e)
         {
             var dialog = new OpenFileDialog
             {
@@ -813,7 +813,7 @@ namespace Ploco.Dialogs
                         calibration.TemplateHash = _document.TemplateHash;
                     }
                     _calibrations[calibration.PageIndex] = calibration;
-                    _repository.SaveTemplateCalibration(calibration);
+                    await _repository.SaveTemplateCalibrationAsync(calibration);
                 }
 
                 // Recharger les lignes visuelles
@@ -827,7 +827,7 @@ namespace Ploco.Dialogs
             }
         }
 
-        private void ResetCalibration_Click(object sender, RoutedEventArgs e)
+        private async void ResetCalibration_Click(object sender, RoutedEventArgs e)
         {
             if (_document == null)
             {
@@ -856,7 +856,7 @@ namespace Ploco.Dialogs
                     calibration.Rows.Clear();
                     calibration.XStart = 0;
                     calibration.XEnd = 0;
-                    _repository.SaveTemplateCalibration(calibration);
+                    await _repository.SaveTemplateCalibrationAsync(calibration);
                 }
 
                 // Rafraîchir l'affichage
@@ -993,7 +993,7 @@ namespace Ploco.Dialogs
                 "Calibrage", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
-        private void ApplyCalibration_Click(object sender, RoutedEventArgs e)
+        private async void ApplyCalibration_Click(object sender, RoutedEventArgs e)
         {
             if (_document == null)
             {
@@ -1008,7 +1008,7 @@ namespace Ploco.Dialogs
             }
 
             _calibrations[calibration.PageIndex] = calibration;
-            _repository.SaveTemplateCalibration(calibration);
+            await _repository.SaveTemplateCalibrationAsync(calibration);
             MessageBox.Show("Calibration enregistrée.", "Calibration", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
