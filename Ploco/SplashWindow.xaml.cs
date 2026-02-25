@@ -10,9 +10,7 @@ namespace Ploco
         {
             InitializeComponent();
             
-            // Récupère dynamiquement la version de l'assemblage
-            var version = Assembly.GetExecutingAssembly().GetName().Version;
-            TxtVersion.Text = $"Version {version?.Major}.{version?.Minor}.{version?.Build}";
+            TxtVersion.Text = "Version 1.0.7 - Stable";
         }
 
         public void UpdateProgress(int percentage, string statusMessage)

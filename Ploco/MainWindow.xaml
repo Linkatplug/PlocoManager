@@ -5,7 +5,7 @@
         xmlns:helpers="clr-namespace:Ploco.Helpers"
         xmlns:b="http://schemas.microsoft.com/xaml/behaviors"
         xmlns:behaviors="clr-namespace:Ploco.Behaviors"
-        Title="Ploco - Gestion de parcs locomotives - 1.0.6-beta3.3_build.001" Height="800" Width="1200"
+        Title="Ploc Manager - V1.0.7 Release - By LNK Services" Height="800" Width="1200"
         Icon="pack://application:,,,/img/train_logo.ico"
         Background="{DynamicResource AppBackgroundBrush}"
         Loaded="Window_Loaded" Closing="Window_Closing">
