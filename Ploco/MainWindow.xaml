@@ -181,6 +181,7 @@
                             <Menu Grid.Column="1" HorizontalAlignment="Right">
                                 <MenuItem Header="...">
                                     <MenuItem Header="Renommer tuile" Command="{Binding DataContext.RenameTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    <MenuItem Header="Vider la tuile" Command="{Binding DataContext.EmptyTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                     <MenuItem Header="Supprimer tuile" Command="{Binding DataContext.DeleteTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                     <Separator/>
                                     <MenuItem Header="Ajouter voie de sortie" Command="{Binding DataContext.AddDepotOutputTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
@@ -361,6 +362,7 @@
                             <Menu Grid.Column="1" HorizontalAlignment="Right">
                                 <MenuItem Header="...">
                                     <MenuItem Header="Renommer tuile" Command="{Binding DataContext.RenameTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    <MenuItem Header="Vider la tuile" Command="{Binding DataContext.EmptyTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                     <MenuItem Header="Supprimer tuile" Command="{Binding DataContext.DeleteTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                     <Separator/>
                                     <MenuItem Header="Ajouter zone" Command="{Binding DataContext.AddZoneTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
@@ -643,6 +645,7 @@
                             <Menu Grid.Column="1" HorizontalAlignment="Right">
                                 <MenuItem Header="...">
                                     <MenuItem Header="Renommer tuile" Command="{Binding DataContext.RenameTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    <MenuItem Header="Vider la tuile" Command="{Binding DataContext.EmptyTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                     <MenuItem Header="Supprimer tuile" Command="{Binding DataContext.DeleteTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                     <Separator/>
                                     <MenuItem Header="Ajouter voie" Command="{Binding DataContext.AddLineTrackCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
@@ -770,6 +773,7 @@
                             <Menu Grid.Column="1" HorizontalAlignment="Right">
                                 <MenuItem Header="...">
                                     <MenuItem Header="Renommer tuile" Command="{Binding DataContext.RenameTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    <MenuItem Header="Vider la tuile" Command="{Binding DataContext.EmptyTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                     <MenuItem Header="Supprimer tuile" Command="{Binding DataContext.DeleteTileCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                     <Separator/>
                                     <MenuItem Header="Configurer lignes" Command="{Binding DataContext.ConfigureRollingLineTracksCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>

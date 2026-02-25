@@ -31,6 +31,8 @@ namespace Ploco.Models
         RollingLine
     }
 
+
+
     public class RollingStockSeries
     {
         public int Id { get; set; }
@@ -280,7 +282,8 @@ namespace Ploco.Models
         private bool _isRightBlocked;
         private string? _trainNumber;
 
-        public int Id { get; set; }
+        private static int _nextTempId = -1;
+        public int Id { get; set; } = System.Threading.Interlocked.Decrement(ref _nextTempId);
         public int TileId { get; set; }
         public int Position { get; set; }
 
@@ -472,7 +475,8 @@ namespace Ploco.Models
         private readonly ObservableCollection<TrackModel> _lineTracks = new();
         private readonly ObservableCollection<TrackModel> _rollingLineTracks = new();
 
-        public int Id { get; set; }
+        private static int _nextTempId = -1;
+        public int Id { get; set; } = System.Threading.Interlocked.Decrement(ref _nextTempId);
         private TileType _type;
 
         public TileType Type

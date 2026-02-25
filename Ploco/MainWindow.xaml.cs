@@ -718,6 +718,11 @@ namespace Ploco
 
             foreach (var loco in _viewModel.Locomotives)
             {
+                loco.IsForecastOrigin = false;
+                loco.ForecastTargetRollingLineTrackId = null;
+                loco.IsForecastGhost = false;
+                loco.ForecastSourceLocomotiveId = null;
+
                 loco.AssignedTrackId = null;
                 loco.AssignedTrackOffsetX = null;
                 loco.Status = LocomotiveStatus.Ok;

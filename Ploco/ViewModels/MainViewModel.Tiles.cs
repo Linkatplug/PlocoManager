@@ -64,6 +64,22 @@ namespace Ploco.ViewModels
             {
                 foreach (var loco in track.Locomotives.ToList())
                 {
+                    if (loco.IsForecastGhost)
+                    {
+                        var origin = Locomotives.FirstOrDefault(l => l.Id == loco.ForecastSourceLocomotiveId || (l.Number == loco.Number && l.IsForecastOrigin));
+                        if (origin != null)
+                        {
+                            origin.IsForecastOrigin = false;
+                            origin.ForecastTargetRollingLineTrackId = null;
+                        }
+                    }
+                    else if (loco.IsForecastOrigin)
+                    {
+                        Helpers.PrevisionnelLogicHelper.RemoveForecastGhostsFor(loco, Tiles);
+                        loco.IsForecastOrigin = false;
+                        loco.ForecastTargetRollingLineTrackId = null;
+                    }
+
                     track.Locomotives.Remove(loco);
                     loco.AssignedTrackId = null;
                 }
@@ -73,6 +89,51 @@ namespace Ploco.ViewModels
             UpdatePoolVisibility();
             OnStatePersisted?.Invoke();
             OnWorkspaceChanged?.Invoke();
+        }
+
+        [RelayCommand]
+        public async Task EmptyTileAsync(TileModel tile)
+        {
+            if (tile == null) return;
+            
+            var locoCount = tile.Tracks.Sum(t => t.Locomotives.Count);
+            if (locoCount == 0) return;
+
+            var result = System.Windows.MessageBox.Show($"Toutes les {locoCount} locomotives vont quitter ce lieu pour retourner dans le parc.\nÊtes-vous sûr(e) de le vider complètement ?", "Vider le lieu", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
+            
+            if (result == System.Windows.MessageBoxResult.Yes)
+            {
+                foreach (var track in tile.Tracks.ToList())
+                {
+                    foreach (var loco in track.Locomotives.ToList())
+                    {
+                        if (loco.IsForecastGhost)
+                        {
+                            var origin = Locomotives.FirstOrDefault(l => l.Id == loco.ForecastSourceLocomotiveId || (l.Number == loco.Number && l.IsForecastOrigin));
+                            if (origin != null)
+                            {
+                                origin.IsForecastOrigin = false;
+                                origin.ForecastTargetRollingLineTrackId = null;
+                            }
+                        }
+                        else if (loco.IsForecastOrigin)
+                        {
+                            Helpers.PrevisionnelLogicHelper.RemoveForecastGhostsFor(loco, Tiles);
+                            loco.IsForecastOrigin = false;
+                            loco.ForecastTargetRollingLineTrackId = null;
+                        }
+
+                        track.Locomotives.Remove(loco);
+                        loco.AssignedTrackId = null;
+                        loco.AssignedTrackOffsetX = null;
+                    }
+                }
+                
+                await _repository.AddHistoryAsync("TileEmptied", $"Le lieu {tile.DisplayTitle} a été vidé de ses locomotives.");
+                UpdatePoolVisibility();
+                OnStatePersisted?.Invoke();
+                OnWorkspaceChanged?.Invoke();
+            }
         }
 
         [RelayCommand]
@@ -166,6 +227,22 @@ namespace Ploco.ViewModels
 
             foreach (var loco in track.Locomotives.ToList())
             {
+                if (loco.IsForecastGhost)
+                {
+                    var origin = Locomotives.FirstOrDefault(l => l.Id == loco.ForecastSourceLocomotiveId || (l.Number == loco.Number && l.IsForecastOrigin));
+                    if (origin != null)
+                    {
+                        origin.IsForecastOrigin = false;
+                        origin.ForecastTargetRollingLineTrackId = null;
+                    }
+                }
+                else if (loco.IsForecastOrigin)
+                {
+                    Helpers.PrevisionnelLogicHelper.RemoveForecastGhostsFor(loco, Tiles);
+                    loco.IsForecastOrigin = false;
+                    loco.ForecastTargetRollingLineTrackId = null;
+                }
+
                 track.Locomotives.Remove(loco);
                 loco.AssignedTrackId = null;
             }
