@@ -57,26 +57,72 @@ namespace Ploco
             Logger.Info("Application starting", "Application");
         }
 
-        private async void Window_Loaded(object sender, RoutedEventArgs e)
+        public async Task InitializeAppAsync(SplashWindow splash)
+        {
+            Logger.Info("Initializing application from Splash Screen", "Application");
+            
+            // Lancement du VRAI chargement en arrière-plan sans bloquer la façade
+            var backgroundLoadTask = Task.Run(async () =>
+            {
+                await _repository.InitializeAsync();
+                await _repository.SeedDefaultDataIfNeededAsync();
+
+                await Application.Current.Dispatcher.InvokeAsync(async () => 
+                {
+                    await LoadStateAsync();
+                });
+                
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    LoadLayoutPresets();
+                    RefreshPresetMenu();
+                    ApplyTheme(false);
+                });
+            });
+
+            // Tableau des phrases fictives (Easter Eggs)
+            var easterEggs = new[]
+            {
+                "Remplissage des sablières",
+                "Graissage des boudins",
+                "Chargement des lanternes",
+                "Réception d'un appel du SUD de MUN",
+                "VAP du cœur du programme",
+                "Formule magique anti-DDS",
+                "Enclenchement du DJ",
+                "... Appel du SUD du MUN ..."
+            };
+
+            // Boucle d'allumage fictif
+            int stepLength = 100 / easterEggs.Length;
+            for (int i = 0; i < easterEggs.Length; i++)
+            {
+                int currentPercent = (i + 1) * stepLength;
+                splash.UpdateProgress(currentPercent, easterEggs[i] + "...");
+                
+                // Attente stricte de 1 seconde (1000ms) par phrase
+                await Task.Delay(1000); 
+            }
+
+            // Attente de sécurité si le vrai chargement derrière était plus long que prévu
+            await backgroundLoadTask;
+            
+            splash.UpdateProgress(100, "100%");
+            await Task.Delay(200);
+            
+            Logger.Info($"Loaded {_viewModel.Locomotives.Count} locomotives and {_viewModel.Tiles.Count} tiles", "Application");
+        }
+
+        private void Window_Loaded(object sender, RoutedEventArgs e)
         {
             Logger.Info("Main window loaded", "Application");
             
-            // Restore window settings
             WindowSettingsHelper.RestoreWindowSettings(this, "MainWindow");
             
-            await _repository.InitializeAsync();
-            await _repository.SeedDefaultDataIfNeededAsync();
-
-            await LoadStateAsync();
-            LoadLayoutPresets();
-            RefreshPresetMenu();
-            ApplyTheme(false);
             LocomotiveList.ItemsSource = _viewModel.Locomotives;
             TileCanvas.ItemsSource = _viewModel.Tiles;
             InitializeLocomotiveView();
             UpdateTileCanvasExtent();
-            
-            Logger.Info($"Loaded {_viewModel.Locomotives.Count} locomotives and {_viewModel.Tiles.Count} tiles", "Application");
         }
 
         private void TileScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)

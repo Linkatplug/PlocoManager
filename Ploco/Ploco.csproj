@@ -44,6 +44,7 @@
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Resource>
     <Resource Include="img\train_logo.ico" />
+    <Resource Include="img\splash.png" />
   </ItemGroup>
 
   <ItemGroup>
