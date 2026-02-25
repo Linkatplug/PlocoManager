@@ -44,20 +44,16 @@ namespace Ploco.Behaviors
                 return;
             }
 
-            LocomotiveModel loco = null;
-            if (AssociatedObject is ListBox listBox)
+            if (AssociatedObject is ListBox listBox && listBox.SelectedItem is LocomotiveModel modelList)
             {
-                loco = listBox.SelectedItem as LocomotiveModel;
+                if (modelList.IsForecastGhost) return;
+                DragDrop.DoDragDrop(AssociatedObject, modelList, DragDropEffects.Move);
             }
-            else
+            else if (AssociatedObject?.DataContext is LocomotiveModel modelContext)
             {
-                loco = AssociatedObject.DataContext as LocomotiveModel;
+                if (modelContext.IsForecastGhost) return;
+                DragDrop.DoDragDrop(AssociatedObject, modelContext, DragDropEffects.Move);
             }
-
-            if (loco == null || loco.IsForecastGhost)
-                return;
-
-            DragDrop.DoDragDrop(AssociatedObject, loco, DragDropEffects.Move);
         }
     }
 }

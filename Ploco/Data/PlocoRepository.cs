@@ -669,11 +669,12 @@ namespace Ploco.Data
             }
 
             using var transaction = connection.BeginTransaction();
-            var seriesId = await InsertSeriesAsync(connection, "1300", 1301, 1349);
-            await InsertSeriesAsync(connection, "37000", 37001, 37040);
+            var seriesId = await InsertSeriesAsync(connection, "1300", 1301, 1349, transaction);
+            await InsertSeriesAsync(connection, "37000", 37001, 37040, transaction);
 
             using (var insertLoco = connection.CreateCommand())
             {
+                insertLoco.Transaction = transaction;
                 insertLoco.CommandText = "INSERT INTO locomotives (series_id, number, status, pool, is_forecast_origin, is_forecast_ghost) VALUES ($seriesId, $number, $status, $pool, 0, 0);";
                 var seriesParam = insertLoco.CreateParameter();
                 seriesParam.ParameterName = "$seriesId";
@@ -707,16 +708,16 @@ namespace Ploco.Data
             await connection.OpenAsync();
             using var transaction = connection.BeginTransaction();
 
-            await ExecuteNonQueryAsync(connection, "DELETE FROM track_locomotives;");
-            await ExecuteNonQueryAsync(connection, "DELETE FROM tracks;");
-            await ExecuteNonQueryAsync(connection, "DELETE FROM tiles;");
-            await ExecuteNonQueryAsync(connection, "DELETE FROM locomotives;");
-            await ExecuteNonQueryAsync(connection, "DELETE FROM series;");
+            await ExecuteNonQueryAsync(connection, "DELETE FROM track_locomotives;", transaction);
+            await ExecuteNonQueryAsync(connection, "DELETE FROM tracks;", transaction);
+            await ExecuteNonQueryAsync(connection, "DELETE FROM tiles;", transaction);
+            await ExecuteNonQueryAsync(connection, "DELETE FROM locomotives;", transaction);
+            await ExecuteNonQueryAsync(connection, "DELETE FROM series;", transaction);
 
             var seriesIdMap = new Dictionary<int, int>();
             foreach (var series in state.Series)
             {
-                var newId = await InsertSeriesAsync(connection, series.Name, series.StartNumber, series.EndNumber);
+                var newId = await InsertSeriesAsync(connection, series.Name, series.StartNumber, series.EndNumber, transaction);
                 seriesIdMap[series.Id] = newId;
                 series.Id = newId;
             }
@@ -728,6 +729,7 @@ namespace Ploco.Data
                     loco.SeriesId = newSeriesId;
                 }
                 using var command = connection.CreateCommand();
+                command.Transaction = transaction;
                 command.CommandText = "INSERT INTO locomotives (series_id, number, status, pool, traction_percent, hs_reason, defaut_info, traction_info, maintenance_date, is_forecast_origin, is_forecast_ghost) VALUES ($seriesId, $number, $status, $pool, $traction, $reason, $defaut, $tractionInfo, $maintenance, $isOrigin, $isGhost);";
                 command.Parameters.AddWithValue("$seriesId", loco.SeriesId);
                 command.Parameters.AddWithValue("$number", loco.Number);
@@ -741,12 +743,13 @@ namespace Ploco.Data
                 command.Parameters.AddWithValue("$isOrigin", loco.IsForecastOrigin ? 1 : 0);
                 command.Parameters.AddWithValue("$isGhost", loco.IsForecastGhost ? 1 : 0);
                 await command.ExecuteNonQueryAsync();
-                loco.Id = await GetLastInsertRowIdAsync(connection);
+                loco.Id = await GetLastInsertRowIdAsync(connection, transaction);
             }
 
             foreach (var tile in state.Tiles)
             {
                 using var command = connection.CreateCommand();
+                command.Transaction = transaction;
                 command.CommandText = "INSERT INTO tiles (name, type, x, y, config_json) VALUES ($name, $type, $x, $y, $config);";
                 command.Parameters.AddWithValue("$name", tile.Name);
                 command.Parameters.AddWithValue("$type", tile.Type.ToString());
@@ -762,12 +765,13 @@ namespace Ploco.Data
                 });
                 command.Parameters.AddWithValue("$config", configJson);
                 await command.ExecuteNonQueryAsync();
-                tile.Id = await GetLastInsertRowIdAsync(connection);
+                tile.Id = await GetLastInsertRowIdAsync(connection, transaction);
 
                 var trackPosition = 0;
                 foreach (var track in tile.Tracks)
                 {
                     using var trackCommand = connection.CreateCommand();
+                    trackCommand.Transaction = transaction;
                     trackCommand.CommandText = "INSERT INTO tracks (tile_id, name, position, type, config_json) VALUES ($tileId, $name, $position, $type, $config);";
                     trackCommand.Parameters.AddWithValue("$tileId", tile.Id);
                     trackCommand.Parameters.AddWithValue("$name", track.Name);
@@ -795,12 +799,13 @@ namespace Ploco.Data
                         : DBNull.Value;
                     trackCommand.Parameters.AddWithValue("$config", configValue);
                     await trackCommand.ExecuteNonQueryAsync();
-                    track.Id = await GetLastInsertRowIdAsync(connection);
+                    track.Id = await GetLastInsertRowIdAsync(connection, transaction);
 
                     var locoPosition = 0;
                     foreach (var loco in track.Locomotives)
                     {
                         using var assignCommand = connection.CreateCommand();
+                        assignCommand.Transaction = transaction;
                         assignCommand.CommandText = "INSERT INTO track_locomotives (track_id, loco_id, position, offset_x) VALUES ($trackId, $locoId, $position, $offsetX);";
                         assignCommand.Parameters.AddWithValue("$trackId", track.Id);
                         assignCommand.Parameters.AddWithValue("$locoId", loco.Id);
@@ -814,7 +819,7 @@ namespace Ploco.Data
                 }
             }
 
-            SavePlaces(connection, state.Tiles);
+            SavePlaces(connection, state.Tiles, transaction);
             transaction.Commit();
         }
 
@@ -830,15 +835,16 @@ namespace Ploco.Data
             await command.ExecuteNonQueryAsync();
         }
 
-        private static async Task<int> InsertSeriesAsync(SqliteConnection connection, string name, int startNumber, int endNumber)
+        private static async Task<int> InsertSeriesAsync(SqliteConnection connection, string name, int startNumber, int endNumber, SqliteTransaction? transaction = null)
         {
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = "INSERT INTO series (name, start_number, end_number) VALUES ($name, $start, $end);";
             command.Parameters.AddWithValue("$name", name);
             command.Parameters.AddWithValue("$start", startNumber);
             command.Parameters.AddWithValue("$end", endNumber);
             await command.ExecuteNonQueryAsync();
-            return await GetLastInsertRowIdAsync(connection);
+            return await GetLastInsertRowIdAsync(connection, transaction);
         }
 
         private static LocomotiveStatus ParseLocomotiveStatus(string value)
@@ -862,9 +868,10 @@ namespace Ploco.Data
             return LocomotiveStatus.Ok;
         }
 
-        private static async Task ExecuteNonQueryAsync(SqliteConnection connection, string sql)
+        private static async Task ExecuteNonQueryAsync(SqliteConnection connection, string sql, SqliteTransaction? transaction = null)
         {
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = sql;
             await command.ExecuteNonQueryAsync();
         }
@@ -944,12 +951,14 @@ namespace Ploco.Data
 
             using (var command = connection.CreateCommand())
             {
+                command.Transaction = transaction;
                 command.CommandText = "UPDATE locomotives SET traction_percent = NULL, hs_reason = NULL;";
                 await command.ExecuteNonQueryAsync();
             }
 
             using (var command = connection.CreateCommand())
             {
+                command.Transaction = transaction;
                 command.CommandText = "UPDATE tracks SET config_json = NULL WHERE type = 'Line';";
                 await command.ExecuteNonQueryAsync();
             }
@@ -986,9 +995,10 @@ namespace Ploco.Data
             return true;
         }
 
-        private static async Task<int> GetLastInsertRowIdAsync(SqliteConnection connection)
+        private static async Task<int> GetLastInsertRowIdAsync(SqliteConnection connection, SqliteTransaction? transaction = null)
         {
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = "SELECT last_insert_rowid();";
             return Convert.ToInt32(await command.ExecuteScalarAsync());
         }
@@ -1044,12 +1054,13 @@ namespace Ploco.Data
             return headerText.StartsWith("SQLite format 3");
         }
 
-        private static async void SavePlaces(SqliteConnection connection, IEnumerable<TileModel> tiles)
+        private static async void SavePlaces(SqliteConnection connection, IEnumerable<TileModel> tiles, SqliteTransaction? transaction = null)
         {
             const string cmdText = "INSERT OR IGNORE INTO places (type, name) VALUES ($type, $name);";
             foreach (var tile in tiles)
             {
                 using var command = new SqliteCommand(cmdText, connection);
+                command.Transaction = transaction;
                 command.Parameters.AddWithValue("$type", tile.Type.ToString());
                 command.Parameters.AddWithValue("$name", tile.Name);
                 await command.ExecuteNonQueryAsync();

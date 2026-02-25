@@ -13,6 +13,7 @@
         <helpers:BindingProxy x:Key="DataContextProxy" Data="{Binding}" />
         <local:StatutToBrushConverter x:Key="StatutToBrushConverter"/>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+        <local:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibilityConverter"/>
         
         <!-- Style for locomotive Border with forecast color overlay -->
         <Style x:Key="LocomotiveBorderStyle" TargetType="Border">
@@ -911,12 +912,27 @@
         </ToolBar>
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="260"/>
+                <ColumnDefinition>
+                    <ColumnDefinition.Style>
+                        <Style TargetType="ColumnDefinition">
+                            <Setter Property="Width" Value="260" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsPoolExpanded}" Value="False">
+                                    <Setter Property="Width" Value="45" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ColumnDefinition.Style>
+                </ColumnDefinition>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <Border Grid.Column="0" Margin="10" Background="{DynamicResource PanelBackgroundBrush}" CornerRadius="6">
-                <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="Locomotives" FontWeight="Bold" Margin="8"/>
+                <!-- Vue détaillée développée -->
+                <DockPanel Visibility="{Binding IsPoolExpanded, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Grid DockPanel.Dock="Top" Margin="8">
+                        <TextBlock Text="Locomotives" FontWeight="Bold" VerticalAlignment="Center"/>
+                        <Button Content="&lt;" HorizontalAlignment="Right" VerticalAlignment="Center" Width="24" Height="24" ToolTip="Rétracter le panneau" Command="{Binding TogglePoolCommand}" Background="Transparent" BorderThickness="0"/>
+                    </Grid>
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <ListBox x:Name="LocomotiveList"
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -974,6 +990,21 @@
                     </ScrollViewer>
                 </DockPanel>
             </Border>
+            
+            <!-- Vue repliée (mini-tiroir) -->
+            <Border Grid.Column="0" Margin="10" Background="{DynamicResource PanelBackgroundBrush}" CornerRadius="6"
+                    Visibility="{Binding IsPoolExpanded, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                <DockPanel>
+                    <Button DockPanel.Dock="Top" Content="&gt;" Margin="0,8,0,8" Width="24" Height="24" HorizontalAlignment="Center" ToolTip="Déployer le panneau" Command="{Binding TogglePoolCommand}" Background="Transparent" BorderThickness="0"/>
+                    
+                    <Border DockPanel.Dock="Top" Background="#FF1976D2" CornerRadius="12" Margin="4,10,4,0" Padding="0,4" HorizontalAlignment="Stretch">
+                        <TextBlock Text="{Binding VisibleLocomotivesCount}" Foreground="White" FontWeight="Bold" FontSize="12" HorizontalAlignment="Center"/>
+                    </Border>
+                    
+                    <TextBlock DockPanel.Dock="Top" Text="Loc" FontWeight="SemiBold" FontSize="11" Foreground="SlateGray" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                </DockPanel>
+            </Border>
+
             <Border Grid.Column="1" Margin="10" Background="{DynamicResource CanvasBackgroundBrush}" CornerRadius="6">
                 <ScrollViewer x:Name="TileScrollViewer"
                               HorizontalScrollBarVisibility="Auto"

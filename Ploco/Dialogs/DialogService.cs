@@ -57,14 +57,14 @@ namespace Ploco.Dialogs
             return (true, dialogResult);
         }
 
-        public (bool success, TrackModel track) ShowLineTrackDialog()
+        public (bool success, TrackModel? track) ShowLineTrackDialog()
         {
             var dialog = new LineTrackDialog { Owner = Owner };
             var result = dialog.ShowDialog() == true;
             return (result, result ? dialog.BuildTrack() : null);
         }
 
-        public TrackModel ShowRollingLineSelectionDialog(IEnumerable<TileModel> tiles)
+        public TrackModel? ShowRollingLineSelectionDialog(IEnumerable<TileModel> tiles)
         {
             var dialog = new RollingLineSelectionDialog(tiles) { Owner = Owner };
             return dialog.ShowDialog() == true ? dialog.SelectedTrack : null;

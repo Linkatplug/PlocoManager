@@ -15,8 +15,8 @@ namespace Ploco.Dialogs
         (bool success, string result) ShowSimpleTextDialog(string title, string prompt, string defaultValue = "");
         (bool success, TileType? type, string name) ShowPlaceDialog();
         (bool success, LinePlaceDialogResult? result) ShowLinePlaceDialog(string defaultName);
-        (bool success, TrackModel track) ShowLineTrackDialog();
-        TrackModel ShowRollingLineSelectionDialog(IEnumerable<TileModel> tiles);
+        (bool success, TrackModel? track) ShowLineTrackDialog();
+        TrackModel? ShowRollingLineSelectionDialog(IEnumerable<TileModel> tiles);
         List<int>? ShowRollingLineRangeDialog(int defaultCount);
     }
 }

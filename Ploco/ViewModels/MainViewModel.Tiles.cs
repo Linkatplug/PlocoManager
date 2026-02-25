@@ -10,15 +10,8 @@ namespace Ploco.ViewModels
     public partial class MainViewModel
     {
         private const int DefaultRollingLineCount = 10;
-        private readonly IDialogService _dialogService;
 
         public event Action? OnWorkspaceChanged;
-
-        public MainViewModel(Ploco.Data.IPlocoRepository repository, IDialogService dialogService)
-        {
-            _repository = repository;
-            _dialogService = dialogService;
-        }
 
         [RelayCommand]
         public async Task AddTileAsync()

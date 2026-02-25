@@ -19,6 +19,12 @@ namespace Ploco.ViewModels
         [ObservableProperty]
         private ObservableCollection<LayoutPreset> _layoutPresets = new();
 
+        [ObservableProperty]
+        private bool _isPoolExpanded = true;
+
+        [ObservableProperty]
+        private int _visibleLocomotivesCount = 0;
+
         // Référence au repository
         private readonly Ploco.Data.IPlocoRepository _repository;
 
@@ -26,9 +32,12 @@ namespace Ploco.ViewModels
         public event Action? OnStateLoaded;
         public event Action? OnStatePersisted;
 
-        public MainViewModel(Ploco.Data.IPlocoRepository repository)
+        private readonly Ploco.Dialogs.IDialogService _dialogService;
+
+        public MainViewModel(Ploco.Data.IPlocoRepository repository, Ploco.Dialogs.IDialogService dialogService)
         {
             _repository = repository;
+            _dialogService = dialogService;
         }
 
         public void InitializeEvents(Action persistStateCallback, Action loadStateCallback)
@@ -38,6 +47,12 @@ namespace Ploco.ViewModels
         }
 
         // --- Commandes ---
+
+        [RelayCommand]
+        public void TogglePool()
+        {
+            IsPoolExpanded = !IsPoolExpanded;
+        }
 
         [RelayCommand]
         public async Task SaveDatabaseAsync()
@@ -116,11 +131,17 @@ namespace Ploco.ViewModels
                 }
             }
 
+            int count = 0;
             foreach (var loco in Locomotives)
             {
                 loco.IsVisibleInActivePool = string.Equals(loco.Pool, "Sibelit", StringComparison.OrdinalIgnoreCase)
                                              && loco.AssignedTrackId == null;
+                if (loco.IsVisibleInActivePool)
+                {
+                    count++;
+                }
             }
+            VisibleLocomotivesCount = count;
 
             RequestLocomotiveListRefresh?.Invoke();
         }
