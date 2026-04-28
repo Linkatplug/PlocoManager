@@ -126,6 +126,13 @@ namespace Ploco.ViewModels
                         track.Locomotives.Remove(loco);
                         loco.AssignedTrackId = null;
                         loco.AssignedTrackOffsetX = null;
+
+                        if (track.Name.Equals("ATE", StringComparison.OrdinalIgnoreCase) &&
+                            loco.Status == LocomotiveStatus.HS && loco.HsReason == "ATE")
+                        {
+                            loco.Status = LocomotiveStatus.Ok;
+                            loco.HsReason = null;
+                        }
                     }
                 }
                 
@@ -245,6 +252,13 @@ namespace Ploco.ViewModels
 
                 track.Locomotives.Remove(loco);
                 loco.AssignedTrackId = null;
+
+                if (track.Name.Equals("ATE", StringComparison.OrdinalIgnoreCase) &&
+                    loco.Status == LocomotiveStatus.HS && loco.HsReason == "ATE")
+                {
+                    loco.Status = LocomotiveStatus.Ok;
+                    loco.HsReason = null;
+                }
             }
             tile.Tracks.Remove(track);
             tile.RefreshTrackCollections();
@@ -413,6 +427,15 @@ namespace Ploco.ViewModels
                 currentTrack.Locomotives.Remove(loco);
                 Helpers.Logger.Debug($"Locomotive removed from source track {currentTrack.Name}", "Movement");
                 
+                if (currentTrack.Name.Equals("ATE", StringComparison.OrdinalIgnoreCase) && 
+                    !targetTrack.Name.Equals("ATE", StringComparison.OrdinalIgnoreCase) &&
+                    loco.Status == LocomotiveStatus.HS && loco.HsReason == "ATE")
+                {
+                    loco.Status = LocomotiveStatus.Ok;
+                    loco.HsReason = null;
+                    Helpers.Logger.Debug($"Locomotive {loco.Number} automatically set to Ok because removed from ATE track.", "Movement");
+                }
+                
                 if (!currentTrack.Locomotives.Any() && currentTrack.Kind == TrackKind.Line)
                 {
                     var parentTile = Tiles.FirstOrDefault(t => t.Tracks.Contains(currentTrack));
@@ -427,7 +450,14 @@ namespace Ploco.ViewModels
                 }
             }
 
-            if (insertIndex >= 0 && insertIndex <= targetTrack.Locomotives.Count)
+            if ((targetTrack.Kind == TrackKind.Zone || targetTrack.Kind == TrackKind.Output))
+            {
+                // Workaround for WPF ListBox Canvas rendering issues when inserting at index 0.
+                // Since Zone/Output use Canvas, absolute positioning (Canvas.Left) dictates the layout, 
+                // so we can safely append to the ObservableCollection.
+                targetTrack.Locomotives.Add(loco);
+            }
+            else if (insertIndex >= 0 && insertIndex <= targetTrack.Locomotives.Count)
             {
                 targetTrack.Locomotives.Insert(insertIndex, loco);
             }
@@ -437,6 +467,14 @@ namespace Ploco.ViewModels
             }
             
             loco.AssignedTrackId = targetTrack.Id;
+
+            if (targetTrack.Name.Equals("ATE", StringComparison.OrdinalIgnoreCase))
+            {
+                loco.Status = LocomotiveStatus.HS;
+                loco.HsReason = "ATE";
+                Helpers.Logger.Debug($"Locomotive {loco.Number} automatically set to HS ATE because placed on ATE track.", "Movement");
+            }
+
             Helpers.Logger.Debug($"Locomotive added to target track {targetTrack.Name} at position {targetTrack.Locomotives.IndexOf(loco)}", "Movement");
             UpdatePoolVisibility();
             OnStatePersisted?.Invoke();
@@ -534,6 +572,10 @@ namespace Ploco.ViewModels
                 if (!tile.Tracks.Any(t => t.Kind == TrackKind.Zone && t.Name == "917"))
                 {
                     tile.Tracks.Add(new TrackModel { Name = "917", Kind = TrackKind.Zone, LeftLabel = "BLOCK", RightLabel = "BIF" });
+                }
+                if (!tile.Tracks.Any(t => t.Kind == TrackKind.Zone && t.Name.Equals("ATE", StringComparison.OrdinalIgnoreCase)))
+                {
+                    tile.Tracks.Add(new TrackModel { Name = "ATE", Kind = TrackKind.Zone });
                 }
             }
             else if (tile.Name.Equals("Zeebrugge", StringComparison.OrdinalIgnoreCase))

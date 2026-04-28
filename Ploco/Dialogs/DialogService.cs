@@ -70,10 +70,23 @@ namespace Ploco.Dialogs
             return dialog.ShowDialog() == true ? dialog.SelectedTrack : null;
         }
 
+        public TrackModel? ShowTargetTrackSelectionDialog(IEnumerable<TileModel> tiles)
+        {
+            var dialog = new TargetTrackSelectionDialog(tiles) { Owner = Owner };
+            return dialog.ShowDialog() == true ? dialog.SelectedTrack : null;
+        }
+
         public List<int>? ShowRollingLineRangeDialog(int defaultCount)
         {
             var dialog = new RollingLineRangeDialog(defaultCount.ToString()) { Owner = Owner };
             return dialog.ShowDialog() == true ? dialog.SelectedNumbers : null;
+        }
+
+        public ReplaceAction ShowReplaceLocomotiveDialog(string targetTrackName, string existingLocoNumber)
+        {
+            var dialog = new ReplaceLocomotiveDialog(targetTrackName, existingLocoNumber) { Owner = Owner };
+            dialog.ShowDialog();
+            return dialog.SelectedAction;
         }
     }
 }

@@ -10,7 +10,7 @@ namespace Ploco
         {
             InitializeComponent();
             
-            TxtVersion.Text = "Version 1.0.7 - Stable";
+            TxtVersion.Text = "Version 1.0.8 - Stable";
         }
 
         public void UpdateProgress(int percentage, string statusMessage)
