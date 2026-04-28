@@ -5,6 +5,13 @@ namespace Ploco.Dialogs
 {
     public record LinePlaceDialogResult(string PlaceName, string TrackName, string IssueReason, bool IsOnTrain, string TrainNumber, string StopTime, bool IsLocomotiveHs, string HsLocomotiveNumbers, string LocomotiveNumbers);
 
+    public enum ReplaceAction
+    {
+        Cancel,
+        Swap,
+        Pool
+    }
+
     public interface IDialogService
     {
         bool ShowConfirmation(string title, string message);
@@ -17,6 +24,8 @@ namespace Ploco.Dialogs
         (bool success, LinePlaceDialogResult? result) ShowLinePlaceDialog(string defaultName);
         (bool success, TrackModel? track) ShowLineTrackDialog();
         TrackModel? ShowRollingLineSelectionDialog(IEnumerable<TileModel> tiles);
+        TrackModel? ShowTargetTrackSelectionDialog(IEnumerable<TileModel> tiles);
         List<int>? ShowRollingLineRangeDialog(int defaultCount);
+        ReplaceAction ShowReplaceLocomotiveDialog(string targetTrackName, string existingLocoNumber);
     }
 }

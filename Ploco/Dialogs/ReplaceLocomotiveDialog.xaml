@@ -1,0 +1,20 @@
+<Window x:Class="Ploco.Dialogs.ReplaceLocomotiveDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Ligne occupée" Height="150" Width="450"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="MessageTextBlock" TextWrapping="Wrap" FontSize="14" VerticalAlignment="Center" Margin="0,0,0,20"/>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Croiser (Swap)" Width="110" Height="30" Margin="0,0,10,0" Click="Swap_Click" />
+            <Button Content="Tiroir (Pool)" Width="110" Height="30" Margin="0,0,10,0" Click="Pool_Click" />
+            <Button Content="Annuler" Width="100" Height="30" Click="Cancel_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

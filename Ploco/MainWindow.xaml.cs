@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -321,6 +321,15 @@ namespace Ploco
                 track.Locomotives.Remove(loco);
                 loco.AssignedTrackId = null;
                 loco.AssignedTrackOffsetX = null;
+
+                if (track.Name.Equals("ATE", StringComparison.OrdinalIgnoreCase) &&
+                    loco.Status == LocomotiveStatus.HS && loco.HsReason == "ATE")
+                {
+                    loco.Status = LocomotiveStatus.Ok;
+                    loco.HsReason = null;
+                    Logger.Debug($"Locomotive {loco.Number} automatically set to Ok because removed from ATE track to pool.", "Movement");
+                }
+
                 await _repository.AddHistoryAsync("LocomotiveRemoved", $"Loco {loco.Number} retirée de {track.Name}.");
             }
         }
@@ -415,37 +424,40 @@ namespace Ploco
             Logger.Debug($"Opened context menu on loco Id={loco.Id} Number={loco.Number} IsForecastOrigin={loco.IsForecastOrigin} IsForecastGhost={loco.IsForecastGhost}", "ContextMenu");
 
             // Find menu items by name - we need to search through the Items collection
-            MenuItem? placementItem = null;
-            MenuItem? annulerItem = null;
-            MenuItem? validerItem = null;
-
             foreach (var item in contextMenu.Items)
             {
-                if (item is MenuItem menuItem)
+                if (item is FrameworkElement fe)
                 {
-                    if (menuItem.Header?.ToString() == "Placement prévisionnel")
-                        placementItem = menuItem;
-                    else if (menuItem.Header?.ToString() == "Annuler le placement prévisionnel")
-                        annulerItem = menuItem;
-                    else if (menuItem.Header?.ToString() == "Valider le placement prévisionnel")
-                        validerItem = menuItem;
+                    if (loco.IsForecastGhost)
+                    {
+                        if (fe is MenuItem menuItem && (menuItem.Header?.ToString() == "Annuler le placement prévisionnel" || menuItem.Header?.ToString() == "Valider le placement prévisionnel"))
+                        {
+                            fe.Visibility = Visibility.Visible;
+                        }
+                        else
+                        {
+                            fe.Visibility = Visibility.Collapsed;
+                        }
+                    }
+                    else
+                    {
+                        if (fe is MenuItem menuItem)
+                        {
+                            var header = menuItem.Header?.ToString();
+                            // Normal visibility rules for origin or normal locos
+                            if (header == "Placement prévisionnel")
+                                menuItem.Visibility = loco.IsForecastOrigin ? Visibility.Collapsed : Visibility.Visible;
+                            else if (header == "Annuler le placement prévisionnel" || header == "Valider le placement prévisionnel")
+                                menuItem.Visibility = loco.IsForecastOrigin ? Visibility.Visible : Visibility.Collapsed;
+                            else
+                                menuItem.Visibility = Visibility.Visible;
+                        }
+                        else
+                        {
+                            fe.Visibility = Visibility.Visible; // Show separators for normal locos
+                        }
+                    }
                 }
-            }
-
-            // Show/hide based on forecast state
-            if (placementItem != null)
-            {
-                placementItem.Visibility = loco.IsForecastOrigin ? Visibility.Collapsed : Visibility.Visible;
-            }
-
-            if (annulerItem != null)
-            {
-                annulerItem.Visibility = loco.IsForecastOrigin ? Visibility.Visible : Visibility.Collapsed;
-            }
-
-            if (validerItem != null)
-            {
-                validerItem.Visibility = loco.IsForecastOrigin ? Visibility.Visible : Visibility.Collapsed;
             }
         }
 

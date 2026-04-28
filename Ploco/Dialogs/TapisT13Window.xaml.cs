@@ -44,8 +44,8 @@ namespace Ploco.Dialogs
 
                 if (ghostTrack != null)
                 {
-                    string originStr = GetLocationTextForTrack(loco, realTrack, tiles);
-                    string targetStr = GetLocationTextForTrack(loco, ghostTrack, tiles);
+                    string originStr = GetLocationTextForTrack(loco, realTrack, tiles, false);
+                    string targetStr = GetLocationTextForTrack(loco, ghostTrack, tiles, true);
                     report = $"{originStr} + {targetStr}";
                     locHs = isHs ? report : string.Empty;
 
@@ -99,11 +99,11 @@ namespace Ploco.Dialogs
             UpdateSummary();
         }
         
-        private static string GetLocationTextForTrack(LocomotiveModel loco, TrackModel? track, IEnumerable<TileModel> tiles)
+        private static string GetLocationTextForTrack(LocomotiveModel loco, TrackModel? track, IEnumerable<TileModel> tiles, bool isForecastTarget)
         {
             if (track == null) return string.Empty;
             if (track.Kind == TrackKind.RollingLine) return track.Name;
-            return GetTrainLocationText(loco, track, tiles);
+            return GetTrainLocationText(loco, track, tiles, isForecastTarget);
         }
 
         /// <summary>
@@ -131,7 +131,7 @@ namespace Ploco.Dialogs
         /// Gets the train location text for a locomotive.
         /// Handles different track kinds and locomotive statuses.
         /// </summary>
-        private static string GetTrainLocationText(LocomotiveModel loco, TrackModel? track, IEnumerable<TileModel> tiles)
+        private static string GetTrainLocationText(LocomotiveModel loco, TrackModel? track, IEnumerable<TileModel> tiles, bool isForecastTarget = false)
         {
             if (track == null)
             {
@@ -146,6 +146,14 @@ namespace Ploco.Dialogs
                 return $"{location} {track.TrainNumber}";
             }
             
+            // Règle automatique: si la voie est ATE,
+            // Prévisionnel : "ATE"
+            // Physique : "FNND" (l'abréviation de la tuile, location)
+            if (track.Name.Equals("ATE", StringComparison.OrdinalIgnoreCase))
+            {
+                return isForecastTarget ? track.Name.ToUpper() : location;
+            }
+
             // For OK locomotives in depot/garage (not Line, not RollingLine): "DISPO TileName"
             if (loco.Status == LocomotiveStatus.Ok && 
                 track.Kind != TrackKind.Line && 
@@ -202,8 +210,8 @@ namespace Ploco.Dialogs
             {
                 "Thionville" => "THL",
                 "SRH" => "SRH",
-                "Anvers Nord" => "FN",
-                "Anvers" => "FN",
+                "Anvers Nord" => "FNND",
+                "Anvers" => "FNND",
                 "Mulhouse Nord" => "MUN",
                 "Mulhouse" => "MUN",
                 "Bale" => "BAL",
